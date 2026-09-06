@@ -4,7 +4,7 @@ public class RedisConstants {
     public static final String LOGIN_CODE_KEY = "login:code:";
     public static final Long LOGIN_CODE_TTL = 2L;
     public static final String LOGIN_USER_KEY = "login:token:";
-    public static final Long LOGIN_USER_TTL = 36000L;
+    public static final Long LOGIN_USER_TTL = 30L;
 
     public static final Long CACHE_NULL_TTL = 2L;
 
@@ -20,12 +20,16 @@ public class RedisConstants {
     public static final String SECKILL_STOCK_KEY = "seckill:stock:";
     /** 秒杀成功 claim 用户集合（Lua 脚本 SADD 写入，一人一单与补单差集依据） */
     public static final String SECKILL_ORDER_KEY = "seckill:order:";
+    /** claim 归属：seckill:claim:{voucherId}:{userId} -> orderId，用于消费重试和安全回滚 */
+    public static final String SECKILL_CLAIM_KEY = "seckill:claim:";
     /** RocketMQ 事务消息本地标记（与 Lua 扣库存同脚本写入，回查用） */
     public static final String SECKILL_TXN_KEY = "seckill:txn:";
     /** 事务标记 TTL（秒），需覆盖 Broker 回查窗口 */
-    public static final long SECKILL_TXN_TTL_SECONDS = 3600L;
+    public static final long SECKILL_TXN_TTL_SECONDS = 86400L;
     /** 方案 B 排队/结果状态 seckill:queue:{orderId} */
     public static final String SECKILL_QUEUE_KEY = "seckill:queue:";
+    /** 排队结果归属，用于阻止用户查询他人的订单进度 */
+    public static final String SECKILL_QUEUE_OWNER_KEY = "seckill:queue:owner:";
     /** 排队状态 TTL（分钟） */
     public static final long SECKILL_QUEUE_TTL_MINUTES = 5L;
     public static final String BLOG_LIKED_KEY = "blog:liked:";

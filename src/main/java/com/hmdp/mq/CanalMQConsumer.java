@@ -3,7 +3,7 @@ package com.hmdp.mq;
 import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
-import com.hmdp.utils.MultiLevelCacheService;
+import com.hmdp.utils.ShopCacheInvalidator;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.rocketmq.client.consumer.DefaultMQPushConsumer;
 import org.apache.rocketmq.client.consumer.listener.ConsumeConcurrentlyStatus;
@@ -11,6 +11,7 @@ import org.apache.rocketmq.client.consumer.listener.MessageListenerConcurrently;
 import org.apache.rocketmq.common.consumer.ConsumeFromWhere;
 import org.apache.rocketmq.common.message.MessageExt;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.PostConstruct;
@@ -29,6 +30,7 @@ import static com.hmdp.utils.RedisConstants.CACHE_SHOP_KEY;
  */
 @Slf4j
 @Component
+@ConditionalOnProperty(name = "canal.enabled", havingValue = "true")
 public class CanalMQConsumer {
 
     public static final String CANAL_TOPIC = "canal-binlog-topic";
@@ -37,7 +39,7 @@ public class CanalMQConsumer {
     private String nameServer;
 
     @Resource
-    private MultiLevelCacheService multiLevelCacheService;
+    private ShopCacheInvalidator shopCacheInvalidator;
 
     private DefaultMQPushConsumer consumer;
 
@@ -87,7 +89,7 @@ public class CanalMQConsumer {
         if (id == null) {
             return;
         }
-        multiLevelCacheService.evict(CACHE_SHOP_KEY, id);
+        shopCacheInvalidator.evict(id);
         log.info("[Canal] tb_shop 变更，已驱逐缓存 cache:shop:{}", id);
     }
 

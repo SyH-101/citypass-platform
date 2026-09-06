@@ -52,7 +52,11 @@ function _M.allow(dict, key_prefix, rate, capacity)
             local refill = math.floor(elapsed / 1000 * rate)
             if refill > 0 then
                 tokens = math.min(capacity, tokens + refill)
-                last = last + refill * 1000
+                -- refill/rate 才是已经结算的秒数；原先乘 1000 会让 last 跑到未来，令牌长期不再补充
+                last = last + (refill / rate) * 1000
+                if tokens >= capacity then
+                    last = now
+                end
             end
         end
 

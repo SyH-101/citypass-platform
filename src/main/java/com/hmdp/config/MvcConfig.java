@@ -23,16 +23,12 @@ public class MvcConfig implements WebMvcConfigurer {
         registry.addInterceptor(new RefreshTokenInterceptor(stringRedisTemplate)).addPathPatterns("/**").order(0);
         registry.addInterceptor(new LoginInterceptor())
                 .excludePathPatterns(
-                        "/shop/**",
-                        "/voucher/**",
-                        "/shop-type/**",
-                        "/upload/**",
                         "/blog/hot",
                         "/user/code",
                         "/user/login"
                 ).order(1);
         registry.addInterceptor(slidingWindowInterceptor)
-                .addPathPatterns("/voucher-order/seckill/**")
+                .addPathPatterns("/voucher-order/seckill/*")
                 .order(2);
     }
 }

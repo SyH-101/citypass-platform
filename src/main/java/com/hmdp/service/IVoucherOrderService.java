@@ -30,8 +30,8 @@ public interface IVoucherOrderService extends IService<VoucherOrder> {
      */
     long executeSeckillLocalTransaction(Long voucherId, Long userId, Long orderId);
 
-    /** 事务回查：判断 seckill:txn:{orderId} 是否存在 */
-    boolean hasSeckillTxnMarker(Long orderId);
+    /** 事务回查：事务标记过期时还能通过订单归属标记确认 Redis 预扣是否成功 */
+    boolean hasSeckillReservation(Long voucherId, Long userId, Long orderId);
 
     /**
      * 查询秒杀异步结果（方案 B 为主；方案 A 成功时无排队状态，可查订单表兜底）

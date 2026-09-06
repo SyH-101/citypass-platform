@@ -49,11 +49,12 @@ public class SeckillTransactionListener implements TransactionListener {
         try {
             VoucherOrder order = JSONUtil.toBean(
                     new String(msg.getBody(), StandardCharsets.UTF_8), VoucherOrder.class);
-            if (order.getId() == null) {
-                log.warn("事务回查消息体缺少 orderId，回滚");
+            if (order.getId() == null || order.getVoucherId() == null || order.getUserId() == null) {
+                log.warn("事务回查消息体不完整，回滚");
                 return LocalTransactionState.ROLLBACK_MESSAGE;
             }
-            boolean exists = voucherOrderService.hasSeckillTxnMarker(order.getId());
+            boolean exists = voucherOrderService.hasSeckillReservation(
+                    order.getVoucherId(), order.getUserId(), order.getId());
             if (exists) {
                 log.info("事务回查：标记存在，COMMIT, orderId={}", order.getId());
                 return LocalTransactionState.COMMIT_MESSAGE;

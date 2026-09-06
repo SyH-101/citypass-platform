@@ -11,6 +11,7 @@ import org.apache.rocketmq.client.consumer.listener.MessageListenerConcurrently;
 import org.apache.rocketmq.common.consumer.ConsumeFromWhere;
 import org.apache.rocketmq.common.message.MessageExt;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.PostConstruct;
@@ -23,6 +24,7 @@ import java.nio.charset.StandardCharsets;
  */
 @Slf4j
 @Component
+@ConditionalOnProperty(name = "rocketmq.enabled", havingValue = "true")
 public class OrderMQConsumer {
 
     @Value("${rocketmq.name-server}")

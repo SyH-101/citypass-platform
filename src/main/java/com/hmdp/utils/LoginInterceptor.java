@@ -11,6 +11,9 @@ public class LoginInterceptor implements HandlerInterceptor {
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
         // 1.判断是否需要拦截（ThreadLocal中是否有用户）
         if (UserHolder.getUser() == null) {
+            if (isPublicRead(request)) {
+                return true;
+            }
             // 没有，需要拦截，设置状态码
             response.setStatus(401);
             // 拦截
@@ -18,5 +21,15 @@ public class LoginInterceptor implements HandlerInterceptor {
         }
         // 有用户，则放行
         return true;
+    }
+
+    private boolean isPublicRead(HttpServletRequest request) {
+        if (!"GET".equalsIgnoreCase(request.getMethod())) {
+            return false;
+        }
+        String uri = request.getRequestURI();
+        return uri.startsWith("/shop/")
+                || uri.startsWith("/voucher/")
+                || uri.startsWith("/shop-type/");
     }
 }

@@ -1,20 +1,19 @@
 package com.hmdp.service.impl;
 
+import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.dto.Result;
 import com.hmdp.entity.SeckillVoucher;
 import com.hmdp.entity.Voucher;
 import com.hmdp.mapper.VoucherMapper;
+import com.hmdp.reliable.ReliableTaskRepository;
 import com.hmdp.service.ISeckillVoucherService;
 import com.hmdp.service.IVoucherService;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.Resource;
 import java.util.List;
-
-import static com.hmdp.utils.RedisConstants.SECKILL_STOCK_KEY;
 
 /**
  * <p>
@@ -30,7 +29,7 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
     @Resource
     private ISeckillVoucherService seckillVoucherService;
     @Resource
-    private StringRedisTemplate stringRedisTemplate;
+    private ReliableTaskRepository reliableTaskRepository;
 
     @Override
     public Result queryVoucherOfShop(Long shopId) {
@@ -44,7 +43,9 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
     @Transactional
     public void addSeckillVoucher(Voucher voucher) {
         // 保存优惠券
-        save(voucher);
+        if (!save(voucher)) {
+            throw new IllegalStateException("优惠券保存失败");
+        }
         // 保存秒杀信息
         SeckillVoucher seckillVoucher = new SeckillVoucher();
         seckillVoucher.setVoucherId(voucher.getId());
@@ -53,8 +54,13 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         seckillVoucher.setInitialStock(voucher.getStock());
         seckillVoucher.setBeginTime(voucher.getBeginTime());
         seckillVoucher.setEndTime(voucher.getEndTime());
-        seckillVoucherService.save(seckillVoucher);
-        // 保存秒杀库存到Redis中
-        stringRedisTemplate.opsForValue().set(SECKILL_STOCK_KEY + voucher.getId(), voucher.getStock().toString());
+        if (!seckillVoucherService.save(seckillVoucher)) {
+            throw new IllegalStateException("秒杀券保存失败");
+        }
+        // 与 DB 同事务写可靠任务；提交后由任务执行器幂等初始化 Redis，失败会持续重试。
+        reliableTaskRepository.enqueue(
+                ReliableTaskRepository.INIT_SECKILL_STOCK,
+                "init-seckill-stock:" + voucher.getId(),
+                JSONUtil.toJsonStr(seckillVoucher));
     }
 }

@@ -9,6 +9,7 @@ import com.hmdp.mapper.ShopMapper;
 import com.hmdp.service.IShopService;
 import com.hmdp.utils.CacheClient;
 import com.hmdp.utils.MultiLevelCacheService;
+import com.hmdp.utils.ShopCacheInvalidator;
 import com.hmdp.utils.SystemConstants;
 import org.springframework.data.geo.Distance;
 import org.springframework.data.geo.GeoResult;
@@ -46,6 +47,9 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
     @Resource
     private MultiLevelCacheService multiLevelCache;
 
+    @Resource
+    private ShopCacheInvalidator shopCacheInvalidator;
+
     @Override
     public Result queryById(Long id) {
         // 多级缓存：Caffeine(L1 JVM) → Redis逻辑过期(L2) → MySQL(L3)
@@ -79,9 +83,12 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
             return Result.fail("店铺id不能为空");
         }
         // 1.更新数据库
-        updateById(shop);
-        // 2.删除多级缓存（Caffeine + Redis）
-        multiLevelCache.evict(CACHE_SHOP_KEY, id);
+        boolean updated = updateById(shop);
+        if (!updated) {
+            return Result.fail("店铺不存在或更新失败");
+        }
+        // 事务提交后再删，避免未提交数据被并发查询重新写回缓存。
+        shopCacheInvalidator.evictAfterCommit(id);
         return Result.ok();
     }
 

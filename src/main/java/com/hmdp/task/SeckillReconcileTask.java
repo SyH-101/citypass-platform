@@ -3,7 +3,7 @@ package com.hmdp.task;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.hmdp.entity.SeckillVoucher;
 import com.hmdp.entity.VoucherOrder;
-import com.hmdp.mq.RocketMQProducer;
+import com.hmdp.mq.OrderMessagePublisher;
 import com.hmdp.service.ISeckillVoucherService;
 import com.hmdp.service.IVoucherOrderService;
 import com.hmdp.utils.RedisIdWorker;
@@ -16,6 +16,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -34,6 +35,7 @@ import java.util.stream.Collectors;
  */
 @Slf4j
 @Component
+@ConditionalOnProperty(name = "seckill.reconcile.enabled", havingValue = "true", matchIfMissing = true)
 public class SeckillReconcileTask {
 
     @Resource
@@ -45,7 +47,7 @@ public class SeckillReconcileTask {
     @Resource
     private RedissonClient redissonClient;
     @Resource
-    private RocketMQProducer rocketMQProducer;
+    private OrderMessagePublisher rocketMQProducer;
     @Resource
     private RedisIdWorker redisIdWorker;
 
@@ -124,7 +126,10 @@ public class SeckillReconcileTask {
                     continue;
                 }
                 VoucherOrder order = new VoucherOrder();
-                order.setId(redisIdWorker.nextId("order"));
+                String claimedOrderId = stringRedisTemplate.opsForValue().get(
+                        RedisConstants.SECKILL_CLAIM_KEY + voucherId + ":" + userId);
+                order.setId(claimedOrderId == null
+                        ? redisIdWorker.nextId("order") : Long.valueOf(claimedOrderId));
                 order.setUserId(Long.valueOf(userId));
                 order.setVoucherId(voucherId);
                 // 补单场景：入口已扣 Redis（claim 已在集合中），消费者走方案 A 路径直接落库，不再 claim

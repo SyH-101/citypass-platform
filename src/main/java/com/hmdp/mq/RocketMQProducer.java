@@ -11,6 +11,7 @@ import org.apache.rocketmq.client.producer.TransactionMQProducer;
 import org.apache.rocketmq.common.message.Message;
 import org.apache.rocketmq.remoting.exception.RemotingException;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.PostConstruct;
@@ -28,7 +29,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 @Slf4j
 @Component
-public class RocketMQProducer {
+@ConditionalOnProperty(name = "rocketmq.enabled", havingValue = "true")
+public class RocketMQProducer implements OrderMessagePublisher {
 
     @Value("${rocketmq.name-server}")
     private String nameServer;

@@ -1,14 +1,18 @@
 package com.hmdp.utils;
 
-import cn.hutool.core.util.BooleanUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
 
+import javax.annotation.PreDestroy;
 import java.time.LocalDateTime;
+import java.util.Collections;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -23,7 +27,15 @@ public class CacheClient {
 
     private final StringRedisTemplate stringRedisTemplate;
 
-    private static final ExecutorService CACHE_REBUILD_EXECUTOR = Executors.newFixedThreadPool(10);
+    private final ExecutorService cacheRebuildExecutor = Executors.newFixedThreadPool(10);
+
+    private static final DefaultRedisScript<Long> UNLOCK_SCRIPT;
+
+    static {
+        UNLOCK_SCRIPT = new DefaultRedisScript<>();
+        UNLOCK_SCRIPT.setLocation(new ClassPathResource("unlock.lua"));
+        UNLOCK_SCRIPT.setResultType(Long.class);
+    }
 
     public CacheClient(StringRedisTemplate stringRedisTemplate) {
         this.stringRedisTemplate = stringRedisTemplate;
@@ -39,7 +51,10 @@ public class CacheClient {
         redisData.setData(value);
         redisData.setExpireTime(LocalDateTime.now().plusSeconds(unit.toSeconds(time)));
         // 写入Redis
-        stringRedisTemplate.opsForValue().set(key, JSONUtil.toJsonStr(redisData));
+        long logicalSeconds = Math.max(1, unit.toSeconds(time));
+        stringRedisTemplate.opsForValue().set(
+                key, JSONUtil.toJsonStr(redisData),
+                Math.max(logicalSeconds * 2, logicalSeconds + 3600), TimeUnit.SECONDS);
     }
 
     public <R,ID> R queryWithPassThrough(
@@ -95,11 +110,11 @@ public class CacheClient {
         // 6.缓存重建
         // 6.1.获取互斥锁
         String lockKey = LOCK_SHOP_KEY + id;
-        boolean isLock = tryLock(lockKey);
+        String lockToken = tryLock(lockKey);
         // 6.2.判断是否获取锁成功
-        if (isLock){
+        if (lockToken != null){
             // 6.3.成功，开启独立线程，实现缓存重建
-            CACHE_REBUILD_EXECUTOR.submit(() -> {
+            cacheRebuildExecutor.submit(() -> {
                 try {
                     // 查询数据库
                     R newR = dbFallback.apply(id);
@@ -109,7 +124,7 @@ public class CacheClient {
                     throw new RuntimeException(e);
                 }finally {
                     // 释放锁
-                    unlock(lockKey);
+                    unlock(lockKey, lockToken);
                 }
             });
         }
@@ -136,42 +151,62 @@ public class CacheClient {
         // 4.实现缓存重建
         // 4.1.获取互斥锁
         String lockKey = LOCK_SHOP_KEY + id;
-        R r = null;
-        try {
-            boolean isLock = tryLock(lockKey);
+        for (int attempt = 0; attempt < 20; attempt++) {
+            String lockToken = tryLock(lockKey);
             // 4.2.判断是否获取成功
-            if (!isLock) {
+            if (lockToken == null) {
                 // 4.3.获取锁失败，休眠并重试
-                Thread.sleep(50);
-                return queryWithMutex(keyPrefix, id, type, dbFallback, time, unit);
+                try {
+                    Thread.sleep(50);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return dbFallback.apply(id);
+                }
+                String refreshed = stringRedisTemplate.opsForValue().get(key);
+                if (StrUtil.isNotBlank(refreshed)) {
+                    return JSONUtil.toBean(refreshed, type);
+                }
+                if (refreshed != null) {
+                    return null;
+                }
+                continue;
             }
-            // 4.4.获取锁成功，根据id查询数据库
-            r = dbFallback.apply(id);
-            // 5.不存在，返回错误
-            if (r == null) {
-                // 将空值写入redis
-                stringRedisTemplate.opsForValue().set(key, "", CACHE_NULL_TTL, TimeUnit.MINUTES);
-                // 返回错误信息
-                return null;
+            try {
+                // 获取锁后双重检查，避免前一个线程已完成重建却再次查库。
+                String refreshed = stringRedisTemplate.opsForValue().get(key);
+                if (StrUtil.isNotBlank(refreshed)) {
+                    return JSONUtil.toBean(refreshed, type);
+                }
+                if (refreshed != null) {
+                    return null;
+                }
+                R r = dbFallback.apply(id);
+                if (r == null) {
+                    stringRedisTemplate.opsForValue().set(key, "", CACHE_NULL_TTL, TimeUnit.MINUTES);
+                    return null;
+                }
+                this.set(key, r, time, unit);
+                return r;
+            } finally {
+                unlock(lockKey, lockToken);
             }
-            // 6.存在，写入redis
-            this.set(key, r, time, unit);
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        }finally {
-            // 7.释放锁
-            unlock(lockKey);
         }
-        // 8.返回
-        return r;
+        log.warn("缓存互斥锁等待超时，降级查库: {}", key);
+        return dbFallback.apply(id);
     }
 
-    private boolean tryLock(String key) {
-        Boolean flag = stringRedisTemplate.opsForValue().setIfAbsent(key, "1", 10, TimeUnit.SECONDS);
-        return BooleanUtil.isTrue(flag);
+    private String tryLock(String key) {
+        String token = UUID.randomUUID().toString();
+        Boolean flag = stringRedisTemplate.opsForValue().setIfAbsent(key, token, 10, TimeUnit.SECONDS);
+        return Boolean.TRUE.equals(flag) ? token : null;
     }
 
-    private void unlock(String key) {
-        stringRedisTemplate.delete(key);
+    private void unlock(String key, String token) {
+        stringRedisTemplate.execute(UNLOCK_SCRIPT, Collections.singletonList(key), token);
+    }
+
+    @PreDestroy
+    public void shutdown() {
+        cacheRebuildExecutor.shutdown();
     }
 }

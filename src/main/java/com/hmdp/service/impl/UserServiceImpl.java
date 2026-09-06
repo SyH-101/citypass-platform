@@ -104,8 +104,21 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         // 7.4.设置token有效期
         stringRedisTemplate.expire(tokenKey, LOGIN_USER_TTL, TimeUnit.MINUTES);
 
+        // 验证码只能使用一次，防止有效期内被重复登录。
+        stringRedisTemplate.delete(LOGIN_CODE_KEY + phone);
+
         // 8.返回token
         return Result.ok(token);
+    }
+
+    @Override
+    public Result logout(String token) {
+        if (token == null || token.trim().isEmpty()) {
+            return Result.fail("缺少登录令牌");
+        }
+        stringRedisTemplate.delete(LOGIN_USER_KEY + token.trim());
+        UserHolder.removeUser();
+        return Result.ok();
     }
 
     @Override

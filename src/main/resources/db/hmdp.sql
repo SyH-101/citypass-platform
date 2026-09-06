@@ -90,8 +90,8 @@ CREATE TABLE `tb_seckill_voucher`  (
   `stock` int(8) NOT NULL COMMENT '库存',
   `initial_stock` int(8) NOT NULL DEFAULT 0 COMMENT '初始库存（对账账本：秒杀结束库存重算的基准，发布时与 stock 一致）',
   `create_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-  `begin_time` timestamp NOT NULL DEFAULT '0000-00-00 00:00:00' COMMENT '生效时间',
-  `end_time` timestamp NOT NULL DEFAULT '0000-00-00 00:00:00' COMMENT '失效时间',
+  `begin_time` datetime NOT NULL COMMENT '生效时间',
+  `end_time` datetime NOT NULL COMMENT '失效时间',
   `update_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`voucher_id`) USING BTREE
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '秒杀优惠券表，与优惠券是一对一关系' ROW_FORMAT = Compact;
@@ -263,5 +263,25 @@ CREATE TABLE `tb_voucher_order`  (
 -- ----------------------------
 -- Records of tb_voucher_order
 -- ----------------------------
+
+-- ----------------------------
+-- Local reliable tasks (transactional outbox / Redis compensation)
+-- ----------------------------
+DROP TABLE IF EXISTS `tb_reliable_task`;
+CREATE TABLE `tb_reliable_task` (
+  `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `task_type` varchar(64) NOT NULL COMMENT 'ORDER_TIMEOUT / RESTORE_REDIS_STOCK / INIT_SECKILL_STOCK',
+  `biz_key` varchar(128) NOT NULL COMMENT '业务幂等键',
+  `payload` varchar(2048) NOT NULL,
+  `status` varchar(16) NOT NULL DEFAULT 'PENDING',
+  `retry_count` int(11) NOT NULL DEFAULT 0,
+  `next_retry_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `last_error` varchar(500) DEFAULT NULL,
+  `create_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `update_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_reliable_task_biz_key` (`biz_key`),
+  KEY `idx_reliable_task_scan` (`status`,`next_retry_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='本地可靠任务/事务发件箱';
 
 SET FOREIGN_KEY_CHECKS = 1;

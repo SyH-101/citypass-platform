@@ -1,16 +1,20 @@
 package com.hmdp.utils;
 
-import cn.hutool.core.util.BooleanUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import com.github.benmanes.caffeine.cache.Cache;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
 
+import javax.annotation.PreDestroy;
 import javax.annotation.Resource;
 import java.time.LocalDateTime;
 import java.util.Random;
+import java.util.Collections;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -39,7 +43,19 @@ public class MultiLevelCacheService {
     private Cache<String, Object> shopLocalCache;
 
     /** 逻辑过期异步重建线程池 */
-    private static final ExecutorService REBUILD_EXECUTOR = Executors.newFixedThreadPool(10);
+    private final ExecutorService rebuildExecutor = Executors.newFixedThreadPool(10, r -> {
+        Thread thread = new Thread(r, "shop-cache-rebuild");
+        thread.setDaemon(true);
+        return thread;
+    });
+
+    private static final DefaultRedisScript<Long> UNLOCK_SCRIPT;
+
+    static {
+        UNLOCK_SCRIPT = new DefaultRedisScript<>();
+        UNLOCK_SCRIPT.setLocation(new ClassPathResource("unlock.lua"));
+        UNLOCK_SCRIPT.setResultType(Long.class);
+    }
 
     /** 随机 TTL 因子，避免缓存雪崩 */
     private static final Random RANDOM = new Random();
@@ -87,8 +103,7 @@ public class MultiLevelCacheService {
 
             // 逻辑过期 → 异步重建
             rebuildAsync(keyPrefix, id, dbFallback, ttl, unit);
-            // 返回旧数据
-            shopLocalCache.put(cacheKey, data);
+            // 当前请求可返回旧数据，但不能把过期值重新塞回 L1；重建线程会写入新值。
             return data;
         }
 
@@ -127,42 +142,47 @@ public class MultiLevelCacheService {
         String key = keyPrefix + id;
         String lockKey = LOCK_SHOP_KEY + id;
 
-        try {
-            // 获取互斥锁
-            boolean locked = tryLock(lockKey);
-            if (!locked) {
-                // 拿不到锁 → 短暂休眠后递归重试
-                Thread.sleep(50);
-                return queryWithMultiLevel(keyPrefix, id, type, dbFallback, ttl, unit);
+        for (int attempt = 0; attempt < 20; attempt++) {
+            String token = tryLock(lockKey);
+            if (token != null) {
+                try {
+                    String json = stringRedisTemplate.opsForValue().get(key);
+                    if (StrUtil.isNotBlank(json)) {
+                        RedisData redisData = JSONUtil.toBean(json, RedisData.class);
+                        return JSONUtil.toBean((cn.hutool.json.JSONObject) redisData.getData(), type);
+                    }
+                    if (json != null) {
+                        return null;
+                    }
+                    R result = dbFallback.apply(id);
+                    if (result == null) {
+                        long randomTtl = CACHE_NULL_TTL + RANDOM.nextInt(3);
+                        stringRedisTemplate.opsForValue().set(key, "", randomTtl, TimeUnit.MINUTES);
+                        return null;
+                    }
+                    writeWithLogicalExpire(key, result, ttl, unit);
+                    return result;
+                } finally {
+                    unlock(lockKey, token);
+                }
             }
-
-            // 双重检查：获取锁后再次查 Redis
+            try {
+                Thread.sleep(25L + RANDOM.nextInt(26));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return dbFallback.apply(id);
+            }
             String json = stringRedisTemplate.opsForValue().get(key);
             if (StrUtil.isNotBlank(json)) {
                 RedisData redisData = JSONUtil.toBean(json, RedisData.class);
                 return JSONUtil.toBean((cn.hutool.json.JSONObject) redisData.getData(), type);
             }
-
-            // 查 DB
-            R result = dbFallback.apply(id);
-            if (result == null) {
-                // 空值缓存防穿透，加随机 TTL
-                long randomTtl = CACHE_NULL_TTL + RANDOM.nextInt(3);
-                stringRedisTemplate.opsForValue().set(key, "",
-                        randomTtl, TimeUnit.MINUTES);
+            if (json != null) {
                 return null;
             }
-
-            // 写入 Redis（逻辑过期模式）
-            writeWithLogicalExpire(key, result, ttl, unit);
-            return result;
-
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return dbFallback.apply(id);
-        } finally {
-            unlock(LOCK_SHOP_KEY + id);
         }
+        log.warn("缓存互斥锁等待超时，降级查询数据库: {}", key);
+        return dbFallback.apply(id);
     }
 
     /**
@@ -172,19 +192,29 @@ public class MultiLevelCacheService {
             String keyPrefix, ID id, Function<ID, R> dbFallback, Long ttl, TimeUnit unit) {
 
         String lockKey = LOCK_SHOP_KEY + id;
-        boolean locked = tryLock(lockKey);
-        if (!locked) return; // 已经有别的线程在重建
+        String token = tryLock(lockKey);
+        if (token == null) return; // 已经有别的线程在重建
 
-        REBUILD_EXECUTOR.submit(() -> {
-            try {
-                R data = dbFallback.apply(id);
-                if (data != null) {
-                    writeWithLogicalExpire(keyPrefix + id, data, ttl, unit);
+        try {
+            rebuildExecutor.submit(() -> {
+                try {
+                    R data = dbFallback.apply(id);
+                    if (data != null) {
+                        writeWithLogicalExpire(keyPrefix + id, data, ttl, unit);
+                        shopLocalCache.put(keyPrefix + id, data);
+                    } else {
+                        stringRedisTemplate.opsForValue().set(
+                                keyPrefix + id, "", CACHE_NULL_TTL, TimeUnit.MINUTES);
+                        shopLocalCache.invalidate(keyPrefix + id);
+                    }
+                } finally {
+                    unlock(lockKey, token);
                 }
-            } finally {
-                unlock(lockKey);
-            }
-        });
+            });
+        } catch (RuntimeException rejected) {
+            unlock(lockKey, token);
+            throw rejected;
+        }
     }
 
     /**
@@ -196,17 +226,26 @@ public class MultiLevelCacheService {
         // 随机 TTL ± 20%，避免同时过期引发雪崩
         long baseSec = unit.toSeconds(ttl);
         long jitter = (long) (baseSec * 0.2 * RANDOM.nextDouble());
-        redisData.setExpireTime(LocalDateTime.now().plusSeconds(baseSec + jitter));
-        stringRedisTemplate.opsForValue().set(key, JSONUtil.toJsonStr(redisData));
+        long logicalTtlSeconds = Math.max(1, baseSec + jitter);
+        redisData.setExpireTime(LocalDateTime.now().plusSeconds(logicalTtlSeconds));
+        // 逻辑过期用于平滑重建，物理过期是故障兜底，避免永久脏数据。
+        long physicalTtlSeconds = Math.max(logicalTtlSeconds * 2, logicalTtlSeconds + 3600);
+        stringRedisTemplate.opsForValue().set(
+                key, JSONUtil.toJsonStr(redisData), physicalTtlSeconds, TimeUnit.SECONDS);
     }
 
-    private boolean tryLock(String key) {
-        Boolean ok = stringRedisTemplate.opsForValue()
-                .setIfAbsent(key, "1", 10, TimeUnit.SECONDS);
-        return BooleanUtil.isTrue(ok);
+    private String tryLock(String key) {
+        String token = UUID.randomUUID().toString();
+        Boolean ok = stringRedisTemplate.opsForValue().setIfAbsent(key, token, 10, TimeUnit.SECONDS);
+        return Boolean.TRUE.equals(ok) ? token : null;
     }
 
-    private void unlock(String key) {
-        stringRedisTemplate.delete(key);
+    private void unlock(String key, String token) {
+        stringRedisTemplate.execute(UNLOCK_SCRIPT, Collections.singletonList(key), token);
+    }
+
+    @PreDestroy
+    public void shutdown() {
+        rebuildExecutor.shutdown();
     }
 }

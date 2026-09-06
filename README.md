@@ -1,62 +1,150 @@
 # HMDP-Pro
 
-基于黑马点评课程项目的秒杀链路增强版。  
-仓库：[https://github.com/30bef100w/hmdp-pro](https://github.com/30bef100w/hmdp-pro)
+黑马点评高并发链路增强版，适合作为 Java 后端面试项目学习。项目保留课程原有的登录、店铺、博客、关注、签到等功能，重点完善秒杀、消息可靠性、多级缓存、限流、缓存失效和安全边界。
 
-黑马点评已经把 Redis 缓存、Lua 秒杀、一人一单、异步下单等主干讲清楚了，足够入门。落到更高并发与更长链路时，仍容易碰到：入口缺少分层限流、扣库存与发消息之间一致性偏弱、关单和支付状态机不完整、缓存更新缺少主动失效、主路径之外几乎没有对账兜底。本仓库在保留原有业务模型的前提下，按更接近生产的方式补强这些能力，并提供默认写路径与超大流量下可切换的第二种写策略，方便对照学习与面试表述。
+这是一套可以运行和解释的工程方案，不把“用了 Redis/MQ”当作结果。每个关键组件都对应一个具体故障：重复下单、库存超卖、消息丢失、支付与关单竞争、缓存击穿、脏缓存、恶意高频请求或越权访问。
 
-------
+## 系统结构
 
-### 1. 超大流量下的第二种写策略
+```mermaid
+flowchart LR
+    Client[客户端] --> OR[OpenResty\n令牌桶 + 商铺缓存]
+    OR --> App[Spring Boot]
+    App --> Caffeine[Caffeine]
+    Caffeine --> Redis[(Redis)]
+    App --> MySQL[(MySQL)]
+    App --> RMQ[RocketMQ]
+    RMQ --> Consumer[订单消费者]
+    Consumer --> MySQL
+    MySQL -. binlog .-> Canal[Canal 可选]
+    Canal --> RMQ
+    RMQ --> Evict[缓存驱逐消费者]
+```
 
-**问题：** 默认路径（代码 `seckill.mode=A`）在入口用 Lua 同步扣 Redis 库存并做一人一单；网关只能限制进入应用的 QPS，放行后的峰值仍打在入口 Redis 热点上。  
-**做法：** 第二种写策略（代码 `seckill.mode=B` 可切换）在入口只做限流、写入排队状态，并通过 RocketMQ **普通消息**投递创建单请求，立即返回 `orderId`。库存扣减与一人一单改到 **消费者**里用 claim 脚本执行，再落 MySQL，终态写回供客户端轮询。峰主要削在：网关令牌桶、MQ 堆积（库存速率=消费速度）、以及入口不再同步跑 Lua。
+秒杀提供两种可切换模式：
 
-### 2. 事务消息
+- **A 模式**：入口执行 Lua 预扣库存和一人一单，再用 RocketMQ 事务消息决定创建消息是否提交。适合希望入口快速知道“已受理/无资格”的场景。
+- **B 模式**：入口只写排队状态并发送普通消息，消费者再执行 Redis claim。适合把更大的洪峰移到 MQ 堆积层。
 
-**问题：** 原版常见「先 Lua 扣 Redis，再发异步消息」，发送超时或进程中断时会出现库存已扣无单、或回滚与重复投递纠缠。  
-**做法：** 默认写路径改用 RocketMQ **事务消息**：先发半消息，在本地事务中执行秒杀 Lua（扣库存、一人一单、写事务标记），成功则 COMMIT、失败则 ROLLBACK。Broker 可通过回查事务标记决定半消息去留，把「扣减成功」和「创建单消息最终可消费」绑在一起。
+两种模式最终都经过同一个数据库事务：条件扣 DB 库存、插入订单、写入延迟关单任务同时提交。接口返回订单号表示请求已受理，订单是否落库以结果查询为准。
 
-### 3. 一人一单
+## 这版修复了什么
 
-**问题：** 只靠查订单表或 Redis Set，在连点、多实例和消息重试下仍可能插入多单。  
-**做法：** 入口或消费者（取决于写策略）用 Redis Lua/claim **原子**判断是否已下单；消费者落库前加分布式锁再查一次订单表；数据库对 `(user_id, voucher_id)` 建 **唯一索引** 兜底。三层分别挡热点、挡并发窗口、挡最终漏网。
+- 将 DB 扣库存、订单插入和关单任务放进真实的 Spring 事务，避免扣了库存却没有订单。
+- 增加 `tb_reliable_task` 本地可靠任务表。延迟关单、Redis 库存初始化和关单后的 Redis 回补失败时会重试。
+- Redis claim 记录 `orderId` 归属；回滚脚本只能撤销自己的预扣，避免失败消息破坏另一笔成功订单。
+- RocketMQ 事务标记过期后可通过 claim 归属回查，避免已预扣却误判回滚。
+- 支付和异步结果查询校验当前用户，封住水平越权。
+- 支付、关单都使用 `WHERE status=1` 的条件更新，竞争时只有一个终态成功。
+- 修复缓存互斥锁非持有者解锁、递归重试、过期值重新写回 Caffeine、逻辑缓存永久存在等问题。
+- 店铺更新在事务提交后驱逐 Caffeine、Redis 和可选的 OpenResty 缓存。
+- 修复 OpenResty 响应分块缓存和令牌桶时间推进公式；结果轮询不再占用秒杀限流额度。
+- Canal 消费者改为显式开关；RocketMQ 关闭时普通读功能仍能启动。
+- 完成登出、一次性验证码、上传类型校验、上传路径配置和目录穿越防护；写接口至少要求登录。
 
-### 4. 对账
+详细原因和失败场景见 [docs/02-秒杀一致性深挖.md](docs/02-秒杀一致性深挖.md) 与 [docs/03-缓存限流与安全.md](docs/03-缓存限流与安全.md)。
 
-**问题：** 主路径之外缺少对关单丢失、库存漂移、资格与订单不一致等残留的修复。  
-**做法：** 用 Spring 定时任务跑对账：以订单表为账本，关闭超时未支付单、补齐明显缺失的订单关系，并按有效订单重算校正 Redis 与 MySQL 库存。事务消息负责主路径尽量不错，对账负责错了之后收敛。
+## 一键运行
 
-### 5. 延迟关单
+需要 Docker Desktop，并确保 Linux Engine 已启动：
 
-**问题：** 抢占成功后长期不支付会冻结库存；关单与支付并发时容易误关或重复关。  
-**做法：** 创建单成功后发送 RocketMQ **延迟消息**；到期消费时用条件更新：仍为未支付则关单并回补 Redis/DB 库存，已支付则直接跳过。与支付共用同一套状态约束，避免终态互相覆盖。
+```bash
+docker compose up -d --build
+docker compose ps
+```
 
-### 6. CAS 支付
+服务入口：
 
-**问题：** 「先读状态再更新」在支付回调、关单、重试并发时，可能把已支付订单改乱。  
-**做法：** 支付与关单都走数据库 **条件更新（CAS）**：`WHERE status=未支付` 才改为已支付或已取消。更新行数为 0 视为并发下已有终态，接口侧按幂等处理，保证一单一终态。
+- OpenResty 网关：`http://localhost:8080`
+- Spring Boot 直连：`http://localhost:8081`
+- MySQL：`localhost:3307`，开发账号 `root/123456`（可用 `MYSQL_HOST_PORT` 覆盖）
+- Redis：`localhost:6379`
+- RocketMQ NameServer：`localhost:9876`
 
-### 7. 二级限流（令牌桶 + 滑动窗口）
+首次构建若 Maven 镜像下载较慢，可以先使用本机 Maven，再构建轻量运行镜像：
 
-**问题：** 缺少分层限流时，洪峰请求占满 Tomcat/Redis，成功请求也被拖垮并引发重试放大。  
-**做法：** 第一层在 **OpenResty/网关** 用共享内存 **令牌桶** 限制集群总入口 QPS，超额直接返回繁忙。第二层在应用内用 Redis **滑动窗口** 按 `userId` 限制秒杀调用频率。两层都是快速拒绝，不在入口线程里阻塞等待。
+```powershell
+mvn -DskipTests package
+$env:APP_DOCKERFILE='Dockerfile.runtime'
+docker compose up -d --build
+```
 
-### 8. 多级缓存
+切换 B 模式：
 
-**问题：** 商铺详情多为 Redis → MySQL，热点仍反复打 Redis；更新后若只靠 TTL，脏读窗口偏长。  
-**做法：** 读路径为 **OpenResty 网关缓存 → Caffeine 本地缓存 → Redis（逻辑过期）→ MySQL**；网关命中则不再进入 Java。写库后删除 Caffeine 与 Redis，可选接入 **Canal** 订阅 binlog，经 MQ 通知应用驱逐缓存；网关层靠短 TTL / 主动失效策略与后端协同，缩短脏读窗口。
+```powershell
+$env:SECKILL_MODE='B'
+docker compose up -d --force-recreate app
+docker compose restart openresty
+```
 
-### 9. 读写链路分离
+启用 Canal：
 
-**问题：** 查询与秒杀写共用同步资源时，写路径拖慢读、读洪峰又挤占下单线程与连接。  
-**做法：** 读请求走多级缓存链路，不进入秒杀 Lua/事务消息路径；写请求走限流 + 写策略 A/B + MQ 异步落库 + 支付/关单/对账。这里的分离是业务链路隔离，不是 MySQL 主从复制。
+```powershell
+$env:CANAL_ENABLED='true'
+docker compose --profile canal up -d --build
+```
 
-------
+Canal 依赖 MySQL ROW binlog。Compose 已创建 `canal/canal` 复制账号，并把 `hmdp.tb_shop` 的 flat JSON 事件发送到 `canal-binlog-topic`。第一次启动建议检查：
 
-## 运行
+```bash
+docker compose --profile canal logs canal
+docker compose logs app
+```
 
-JDK 8 · MySQL · Redis · RocketMQ → 导入 `src/main/resources/db/hmdp.sql` → 填写 `application.yaml` 占位配置 → `seckill.mode=A`（默认）或 `B`（第二种写策略）。  
-网关示例配置：`src/main/resources/openresty/`。
+若本机已有 MySQL、Redis 和 RocketMQ，可直接运行应用。默认配置会连接本机 MySQL/Redis，并关闭 MQ；要测试秒杀需设置 `ROCKETMQ_ENABLED=true`。已有旧数据库请执行 `deploy/mysql/migration-v2.sql`。
 
-如果这个项目对你复习高并发或准备面试有帮助，欢迎点一颗 Star 支持一下。
+## 最短接口验证
+
+1. 请求验证码：
+
+```bash
+curl -X POST "http://localhost:8080/user/code?phone=13800138000"
+docker compose logs app
+```
+
+2. 用日志中的验证码登录并保存返回的 token：
+
+```bash
+curl -X POST http://localhost:8080/user/login \
+  -H "Content-Type: application/json" \
+  -d '{"phone":"13800138000","code":"123456"}'
+```
+
+3. 携带 `authorization` 请求头创建秒杀券：
+
+```bash
+curl -X POST http://localhost:8080/voucher/seckill \
+  -H "authorization: TOKEN" -H "Content-Type: application/json" \
+  -d '{"shopId":1,"title":"测试秒杀券","subTitle":"面试演示","rules":"一人一单","payValue":100,"actualValue":500,"type":1,"status":1,"stock":20,"beginTime":"2026-01-01T00:00:00","endTime":"2099-12-31T23:59:59"}'
+```
+
+4. 用返回的券 ID 下单并轮询结果：
+
+```bash
+curl -X POST http://localhost:8080/voucher-order/seckill/VOUCHER_ID -H "authorization: TOKEN"
+curl http://localhost:8080/voucher-order/seckill/result/ORDER_ID -H "authorization: TOKEN"
+```
+
+状态包括 `WAITING`、`SUCCESS`、`FAIL_STOCK`、`FAIL_REPEAT`、`FAIL_SYSTEM`。成功后可调用 `PUT /voucher-order/pay/{orderId}`；超过 15 分钟未支付会被延迟消息关闭，定时对账负责兜底。
+
+## 测试
+
+```bash
+mvn test
+```
+
+单元测试不需要外部服务。两个课程遗留的 Redis/MySQL 演示测试已标为手工测试。完整链路测试使用 Compose 环境执行。
+
+服务启动后可运行自动冒烟测试；脚本会创建两个临时用户和一张库存为 2 的秒杀券，并验证异步成功、越权拦截、重复下单与支付 CAS：
+
+```powershell
+.\scripts\smoke-test.ps1
+```
+
+## 学习顺序
+
+从 [docs/00-先读这里.md](docs/00-先读这里.md) 开始。建议先掌握 A 模式主链路，再理解本地可靠任务，最后比较 B 模式、对账和 Canal。不要从类名和中间件清单开始背。
+
+## 边界
+
+项目用于高并发与一致性学习，后台管理目前只做到登录保护，没有实现管理员 RBAC；模拟支付也不是第三方支付回调。真实生产环境还需要鉴权角色、监控告警、死信人工处理、压测容量数据、密钥管理和多可用区部署。

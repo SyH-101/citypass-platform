@@ -35,12 +35,13 @@ public class SlidingWindowRateLimiter {
      * @return true 放行；false 被限流
      */
     public boolean tryAcquire(String key, long windowMs, int maxRequests) {
-        long now = System.currentTimeMillis();
-        String member = now + "-" + UUID.randomUUID().toString().substring(0, 8);
+        if (windowMs <= 0 || maxRequests <= 0) {
+            throw new IllegalArgumentException("windowMs 和 maxRequests 必须大于 0");
+        }
+        String member = UUID.randomUUID().toString();
         Long r = stringRedisTemplate.execute(
                 SCRIPT,
                 Collections.singletonList(key),
-                String.valueOf(now),
                 String.valueOf(windowMs),
                 String.valueOf(maxRequests),
                 member

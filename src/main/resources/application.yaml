@@ -1,17 +1,19 @@
 server:
   port: 8081
+hmdp:
+  upload-dir: ${HMDP_UPLOAD_DIR:./data/images}
 spring:
   application:
     name: hmdp-pro
   datasource:
     driver-class-name: com.mysql.jdbc.Driver
-    url: jdbc:mysql://127.0.0.1:3306/hmdp?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
-    username: your_mysql_user
-    password: your_mysql_password
+    url: ${MYSQL_URL:jdbc:mysql://127.0.0.1:3306/hmdp?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=utf8}
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:123456}
   redis:
-    host: your_redis_host
-    port: 6379
-    # password: your_redis_password
+    host: ${REDIS_HOST:127.0.0.1}
+    port: ${REDIS_PORT:6379}
+    password: ${REDIS_PASSWORD:}
     lettuce:
       pool:
         max-active: 10
@@ -20,14 +22,29 @@ spring:
         time-between-eviction-runs: 10s
   jackson:
     default-property-inclusion: non_null # JSON处理时忽略非空字段
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 5MB
 mybatis-plus:
   type-aliases-package: com.hmdp.entity # 别名扫描包
 # ===== RocketMQ 消息队列 =====
 rocketmq:
-  name-server: 127.0.0.1:9876
+  enabled: ${ROCKETMQ_ENABLED:false}
+  name-server: ${ROCKETMQ_NAME_SERVER:127.0.0.1:9876}
+canal:
+  enabled: ${CANAL_ENABLED:false}
+gateway-cache:
+  # 例如 http://127.0.0.1/internal/cache/shop；留空时只驱逐 Caffeine + Redis
+  purge-url: ${GATEWAY_CACHE_PURGE_URL:}
+reliable-task:
+  enabled: ${RELIABLE_TASK_ENABLED:true}
+  fixed-delay-ms: 1000
 # ===== 秒杀方案：A=入口预扣+事务消息；B=限流入队+消费者校验 =====
 seckill:
-  mode: A
+  mode: ${SECKILL_MODE:A}
+  reconcile:
+    enabled: ${SECKILL_RECONCILE_ENABLED:true}
   # 二级限流第二层：业务滑动窗口（第一层在 OpenResty 网关令牌桶）
   rate-limit:
     sliding-window:
