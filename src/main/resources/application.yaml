@@ -1,13 +1,13 @@
 server:
   port: 8081
-hmdp:
-  upload-dir: ${HMDP_UPLOAD_DIR:./data/images}
+citypass:
+  upload-dir: ${CITYPASS_UPLOAD_DIR:./data/images}
 spring:
   application:
-    name: hmdp-pro
+    name: citypass
   datasource:
     driver-class-name: com.mysql.jdbc.Driver
-    url: ${MYSQL_URL:jdbc:mysql://127.0.0.1:3306/hmdp?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=utf8}
+    url: ${MYSQL_URL:jdbc:mysql://127.0.0.1:3306/citypass?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=utf8}
     username: ${MYSQL_USERNAME:root}
     password: ${MYSQL_PASSWORD:123456}
   redis:
@@ -27,7 +27,7 @@ spring:
       max-file-size: 5MB
       max-request-size: 5MB
 mybatis-plus:
-  type-aliases-package: com.hmdp.entity # 别名扫描包
+  type-aliases-package: com.citypass.entity
 # ===== RocketMQ 消息队列 =====
 rocketmq:
   enabled: ${ROCKETMQ_ENABLED:false}
@@ -35,22 +35,21 @@ rocketmq:
 canal:
   enabled: ${CANAL_ENABLED:false}
 gateway-cache:
-  # 例如 http://127.0.0.1/internal/cache/shop；留空时只驱逐 Caffeine + Redis
+  # 例如 http://127.0.0.1/internal/cache/venue；留空时只驱逐 Caffeine + Redis
   purge-url: ${GATEWAY_CACHE_PURGE_URL:}
 reliable-task:
   enabled: ${RELIABLE_TASK_ENABLED:true}
   fixed-delay-ms: 1000
-# ===== 秒杀方案：A=入口预扣+事务消息；B=限流入队+消费者校验 =====
-seckill:
-  mode: ${SECKILL_MODE:A}
+reservation:
+  offer-minutes: ${RESERVATION_OFFER_MINUTES:15}
   reconcile:
-    enabled: ${SECKILL_RECONCILE_ENABLED:true}
+    enabled: ${RESERVATION_RECONCILE_ENABLED:true}
   # 二级限流第二层：业务滑动窗口（第一层在 OpenResty 网关令牌桶）
   rate-limit:
     sliding-window:
       enabled: true
       window-ms: 1000      # 窗口 1 秒
-      max-requests: 5      # 同一用户窗口内最多 5 次秒杀请求
+      max-requests: 5      # 同一用户窗口内最多 5 次预约请求
 logging:
   level:
-    com.hmdp: info
+    com.citypass: info

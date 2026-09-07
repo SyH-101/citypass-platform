@@ -1,0 +1,40 @@
+package com.citypass.utils;
+
+public class RedisConstants {
+    public static final String LOGIN_CODE_KEY = "login:code:";
+    public static final Long LOGIN_CODE_TTL = 2L;
+    public static final String LOGIN_USER_KEY = "login:token:";
+    public static final Long LOGIN_USER_TTL = 30L;
+
+    public static final Long CACHE_NULL_TTL = 2L;
+
+    public static final Long CACHE_VENUE_TTL = 30L;
+    public static final String CACHE_VENUE_KEY = "cache:venue:";
+
+    public static final Long CACHE_PASS_TTL = 30L;
+    public static final String CACHE_PASS_KEY = "cache:pass:";
+
+    public static final String LOCK_VENUE_KEY = "lock:venue:";
+    public static final Long LOCK_VENUE_TTL = 10L;
+
+    public static final String RESERVATION_STOCK_KEY = "reservation:stock:";
+    /** 限量预约成功 claim 用户集合（Lua 脚本 SADD 写入，一人一单与补单差集依据） */
+    public static final String RESERVATION_HOLDER_KEY = "reservation:holders:";
+    /** claim 归属：reservation:claim:{activityPassId}:{userId} -> orderId，用于消费重试和安全回滚 */
+    public static final String RESERVATION_CLAIM_KEY = "reservation:claim:";
+    /** 异步预约请求状态 reservation:request:{requestId} */
+    public static final String RESERVATION_REQUEST_KEY = "reservation:request:";
+    /** 排队结果归属，用于阻止用户查询他人的订单进度 */
+    public static final String RESERVATION_REQUEST_OWNER_KEY = "reservation:request:owner:";
+    /** 排队状态 TTL（分钟） */
+    public static final long RESERVATION_REQUEST_TTL_MINUTES = 5L;
+    public static final String STORY_LIKED_KEY = "story:liked:";
+    public static final String FEED_KEY = "feed:";
+    public static final String VENUE_GEO_KEY = "venue:geo:";
+    public static final String USER_SIGN_KEY = "sign:";
+
+    /** 订单状态：1未支付 2已支付 3已核销 4已取消 5退款中 6已退款 */
+    public static final int ORDER_STATUS_UNPAID = 1;
+    public static final int ORDER_STATUS_PAID = 2;
+    public static final int ORDER_STATUS_CANCELLED = 4;
+}

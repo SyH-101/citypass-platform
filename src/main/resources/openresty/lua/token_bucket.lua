@@ -24,7 +24,7 @@ end
 
 ---
 -- dict: ngx.shared dict
--- key_prefix: 如 "seckill"
+-- key_prefix: 如 "reservation"
 -- rate: 每秒补充令牌数（全局）
 -- capacity: 桶容量（全局突发）
 -- @return true 放行 / false 限流

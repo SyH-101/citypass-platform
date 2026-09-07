@@ -1,46 +1,51 @@
--- 已经导入过旧版 hmdp.sql 时执行；全新 Compose 环境无需单独执行。
-SET @add_initial_stock = IF(
-    (SELECT COUNT(*) FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tb_seckill_voucher'
-       AND COLUMN_NAME = 'initial_stock') = 0,
-    'ALTER TABLE tb_seckill_voucher ADD COLUMN initial_stock int(8) NOT NULL DEFAULT 0 COMMENT ''初始库存（库存对账基准）'' AFTER stock',
-    'SELECT 1');
-PREPARE stmt FROM @add_initial_stock;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
+-- 从早期本地生活原型迁移到 CityPass 领域模型。
+-- 适用：已执行旧 schema 且尚未执行本文件的 MySQL 8 数据库。
+-- 全新环境直接使用 src/main/resources/db/citypass.sql，无需执行迁移。
 
-UPDATE tb_seckill_voucher sv
-LEFT JOIN (
-    SELECT voucher_id, COUNT(*) AS valid_orders
-    FROM tb_voucher_order
-    WHERE status IN (1, 2)
-    GROUP BY voucher_id
-) o ON o.voucher_id = sv.voucher_id
-SET sv.initial_stock = sv.stock + COALESCE(o.valid_orders, 0)
-WHERE sv.initial_stock = 0;
+SET FOREIGN_KEY_CHECKS = 0;
 
-SET @add_order_unique = IF(
-    (SELECT COUNT(*) FROM information_schema.STATISTICS
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tb_voucher_order'
-       AND INDEX_NAME = 'uk_user_voucher') = 0,
-    'ALTER TABLE tb_voucher_order ADD UNIQUE INDEX uk_user_voucher(user_id, voucher_id)',
-    'SELECT 1');
-PREPARE stmt FROM @add_order_unique;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
+RENAME TABLE
+  tb_shop TO tb_venue,
+  tb_shop_type TO tb_venue_category,
+  tb_voucher TO tb_activity_pass,
+  tb_seckill_voucher TO tb_limited_pass_stock,
+  tb_voucher_order TO tb_reservation_order,
+  tb_blog TO tb_story,
+  tb_blog_comments TO tb_story_comment,
+  tb_follow TO tb_subscription;
 
-CREATE TABLE IF NOT EXISTS `tb_reliable_task` (
-  `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
-  `task_type` varchar(64) NOT NULL,
-  `biz_key` varchar(128) NOT NULL,
-  `payload` varchar(2048) NOT NULL,
-  `status` varchar(16) NOT NULL DEFAULT 'PENDING',
-  `retry_count` int(11) NOT NULL DEFAULT 0,
-  `next_retry_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `last_error` varchar(500) DEFAULT NULL,
-  `create_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `update_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_reliable_task_biz_key` (`biz_key`),
-  KEY `idx_reliable_task_scan` (`status`,`next_retry_time`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='本地可靠任务/事务发件箱';
+ALTER TABLE tb_venue RENAME COLUMN type_id TO category_id;
+ALTER TABLE tb_activity_pass RENAME COLUMN shop_id TO venue_id;
+ALTER TABLE tb_limited_pass_stock RENAME COLUMN voucher_id TO activity_pass_id;
+ALTER TABLE tb_reservation_order RENAME COLUMN voucher_id TO activity_pass_id;
+ALTER TABLE tb_story RENAME COLUMN shop_id TO venue_id;
+ALTER TABLE tb_story_comment RENAME COLUMN blog_id TO story_id;
+ALTER TABLE tb_subscription RENAME COLUMN follow_user_id TO target_user_id;
+ALTER TABLE tb_user_info RENAME COLUMN followee TO subscription_count;
+
+UPDATE tb_story SET comments = 0 WHERE comments IS NULL;
+UPDATE tb_story_comment
+SET parent_id = COALESCE(parent_id, 0),
+    answer_id = COALESCE(answer_id, 0),
+    liked = COALESCE(liked, 0),
+    status = COALESCE(status, 0);
+
+ALTER TABLE tb_story
+  MODIFY comments int(8) UNSIGNED NOT NULL DEFAULT 0 COMMENT '评论数量';
+ALTER TABLE tb_story_comment
+  MODIFY parent_id bigint(20) UNSIGNED NOT NULL DEFAULT 0,
+  MODIFY answer_id bigint(20) UNSIGNED NOT NULL DEFAULT 0,
+  MODIFY liked int(8) UNSIGNED NOT NULL DEFAULT 0,
+  MODIFY status tinyint(1) UNSIGNED NOT NULL DEFAULT 0;
+
+DELETE duplicate_row
+FROM tb_subscription duplicate_row
+JOIN tb_subscription kept
+  ON duplicate_row.user_id = kept.user_id
+ AND duplicate_row.target_user_id = kept.target_user_id
+ AND duplicate_row.id > kept.id;
+
+ALTER TABLE tb_subscription
+  ADD UNIQUE INDEX uk_subscription_user_target(user_id, target_user_id);
+
+SET FOREIGN_KEY_CHECKS = 1;

@@ -1,3 +1,5 @@
+name: citypass
+
 services:
   mysql:
     image: mysql:8.0.36
@@ -8,13 +10,13 @@ services:
       - --server-id=1
     environment:
       MYSQL_ROOT_PASSWORD: 123456
-      MYSQL_DATABASE: hmdp
+      MYSQL_DATABASE: citypass
       TZ: Asia/Shanghai
     ports:
       - "${MYSQL_HOST_PORT:-3307}:3306"
     volumes:
       - mysql-data:/var/lib/mysql
-      - ./src/main/resources/db/hmdp.sql:/docker-entrypoint-initdb.d/00-hmdp.sql:ro
+      - ./src/main/resources/db/citypass.sql:/docker-entrypoint-initdb.d/00-citypass.sql:ro
       - ./deploy/mysql/01-canal-user.sql:/docker-entrypoint-initdb.d/01-canal-user.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p123456"]
@@ -75,16 +77,15 @@ services:
       context: .
       dockerfile: "${APP_DOCKERFILE:-Dockerfile}"
     environment:
-      MYSQL_URL: jdbc:mysql://mysql:3306/hmdp?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=utf8
+      MYSQL_URL: jdbc:mysql://mysql:3306/citypass?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=utf8
       MYSQL_USERNAME: root
       MYSQL_PASSWORD: 123456
       REDIS_HOST: redis
       ROCKETMQ_ENABLED: "true"
       ROCKETMQ_NAME_SERVER: namesrv:9876
-      SECKILL_MODE: "${SECKILL_MODE:-A}"
-      GATEWAY_CACHE_PURGE_URL: http://openresty/internal/cache/shop
+      GATEWAY_CACHE_PURGE_URL: http://openresty/internal/cache/venue
       CANAL_ENABLED: "${CANAL_ENABLED:-false}"
-      HMDP_UPLOAD_DIR: /app/data/images
+      CITYPASS_UPLOAD_DIR: /app/data/images
     ports:
       - "8081:8081"
     volumes:
@@ -113,7 +114,7 @@ services:
     profiles: ["canal"]
     environment:
       - canal.auto.scan=false
-      - canal.destinations=hmdp
+      - canal.destinations=citypass
       - canal.serverMode=rocketMQ
       - canal.mq.flatMessage=true
       - canal.mq.servers=namesrv:9876
@@ -123,7 +124,7 @@ services:
       - canal.instance.dbPassword=canal
       - canal.instance.connectionCharset=UTF-8
       - canal.instance.gtidon=false
-      - canal.instance.filter.regex=hmdp\.tb_shop
+      - canal.instance.filter.regex=citypass\.tb_venue
       - canal.mq.topic=canal-binlog-topic
       - canal.mq.partition=0
     depends_on:

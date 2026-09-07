@@ -7,6 +7,6 @@ RUN mvn -q -DskipTests package
 
 FROM eclipse-temurin:8-jre-alpine
 WORKDIR /app
-COPY --from=build /workspace/target/hmdp-pro-0.0.1-SNAPSHOT.jar app.jar
+COPY --from=build /workspace/target/citypass-platform-0.0.1-SNAPSHOT.jar app.jar
 EXPOSE 8081
 ENTRYPOINT ["java","-XX:+UseContainerSupport","-jar","/app/app.jar"]
