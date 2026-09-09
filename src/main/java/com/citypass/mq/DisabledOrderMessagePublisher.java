@@ -19,7 +19,7 @@ public class DisabledOrderMessagePublisher implements OrderMessagePublisher {
     }
 
     @Override
-    public void sendOrderTimeout(Long orderId) {
+    public SendResult sendOrderTimeout(Long orderId) {
         throw disabled();
     }
 }

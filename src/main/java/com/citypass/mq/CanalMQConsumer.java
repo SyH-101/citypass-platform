@@ -89,7 +89,7 @@ public class CanalMQConsumer {
         if (id == null) {
             return;
         }
-        venueCacheInvalidator.evict(id);
+        venueCacheInvalidator.evict(id, row.getLong("cache_version"));
         log.info("[Canal] tb_venue 变更，已驱逐缓存 cache:venue:{}", id);
     }
 

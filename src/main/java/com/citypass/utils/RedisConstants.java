@@ -10,6 +10,9 @@ public class RedisConstants {
 
     public static final Long CACHE_VENUE_TTL = 30L;
     public static final String CACHE_VENUE_KEY = "cache:venue:";
+    public static final String CACHE_VENUE_BASELINE_KEY = "cache:venue:baseline:";
+    public static final String CACHE_VENUE_VERSION_KEY = "cache:venue:version:";
+    public static final String CACHE_VENUE_INVALIDATION_CHANNEL = "cache:venue:invalidate";
 
     public static final Long CACHE_PASS_TTL = 30L;
     public static final String CACHE_PASS_KEY = "cache:pass:";

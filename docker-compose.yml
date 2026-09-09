@@ -85,7 +85,10 @@ services:
       ROCKETMQ_NAME_SERVER: namesrv:9876
       GATEWAY_CACHE_PURGE_URL: http://openresty/internal/cache/venue
       CANAL_ENABLED: "${CANAL_ENABLED:-false}"
+      RELIABLE_TASK_ADMIN_TOKEN: "${RELIABLE_TASK_ADMIN_TOKEN:-}"
       CITYPASS_UPLOAD_DIR: /app/data/images
+      TZ: Asia/Shanghai
+      JAVA_TOOL_OPTIONS: -Duser.timezone=Asia/Shanghai
     ports:
       - "8081:8081"
     volumes:

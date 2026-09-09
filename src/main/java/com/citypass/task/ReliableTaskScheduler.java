@@ -4,11 +4,15 @@ import cn.hutool.json.JSONUtil;
 import com.citypass.entity.ReservationOrder;
 import com.citypass.mq.OrderMessagePublisher;
 import com.citypass.reliable.ReliableTask;
+import com.citypass.reliable.ReliableTaskMetrics;
 import com.citypass.reliable.ReliableTaskRepository;
 import com.citypass.reliable.ReservationClaimTransfer;
+import com.citypass.reliable.VenueCacheInvalidation;
+import com.citypass.utils.VenueCacheInvalidator;
 import lombok.extern.slf4j.Slf4j;
-import org.redisson.api.RLock;
-import org.redisson.api.RedissonClient;
+import org.apache.rocketmq.client.producer.SendResult;
+import org.apache.rocketmq.client.producer.SendStatus;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -18,6 +22,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.UUID;
 
 import static com.citypass.utils.RedisConstants.RESERVATION_STOCK_KEY;
 
@@ -30,8 +35,6 @@ public class ReliableTaskScheduler {
     private static final DefaultRedisScript<Long> RESTORE_STOCK_SCRIPT;
     private static final DefaultRedisScript<Long> INIT_STOCK_SCRIPT;
     private static final DefaultRedisScript<Long> TRANSFER_RESERVATION_SCRIPT;
-    private static final long RESTORE_MARKER_TTL_SECONDS = 7 * 24 * 3600L;
-
     static {
         RESTORE_STOCK_SCRIPT = new DefaultRedisScript<>();
         RESTORE_STOCK_SCRIPT.setLocation(new ClassPathResource("restore-stock.lua"));
@@ -47,51 +50,61 @@ public class ReliableTaskScheduler {
     private final ReliableTaskRepository repository;
     private final OrderMessagePublisher producer;
     private final StringRedisTemplate redisTemplate;
-    private final RedissonClient redissonClient;
+    private final VenueCacheInvalidator venueCacheInvalidator;
+    private final ReliableTaskMetrics metrics;
+    private final String instanceId = UUID.randomUUID().toString();
+
+    @Value("${reliable-task.batch-size:50}")
+    private int batchSize;
+
+    @Value("${reliable-task.lease-seconds:30}")
+    private int leaseSeconds;
 
     public ReliableTaskScheduler(ReliableTaskRepository repository,
                                  OrderMessagePublisher producer,
                                  StringRedisTemplate redisTemplate,
-                                 RedissonClient redissonClient) {
+                                 VenueCacheInvalidator venueCacheInvalidator,
+                                 ReliableTaskMetrics metrics) {
         this.repository = repository;
         this.producer = producer;
         this.redisTemplate = redisTemplate;
-        this.redissonClient = redissonClient;
+        this.venueCacheInvalidator = venueCacheInvalidator;
+        this.metrics = metrics;
     }
 
     @Scheduled(fixedDelayString = "${reliable-task.fixed-delay-ms:1000}")
     public void relay() {
-        RLock lock = redissonClient.getLock("lock:reliable-task:relay");
-        if (!lock.tryLock()) {
-            return;
-        }
         try {
-            List<ReliableTask> tasks = repository.findReady(100);
-            for (ReliableTask task : tasks) {
-                execute(task);
+            // 每次只领取即将执行的一条，避免同批后部任务排队时租约先过期。
+            for (int i = 0; i < batchSize; i++) {
+                List<ReliableTask> tasks = repository.claimReady(1, instanceId, leaseSeconds);
+                if (tasks.isEmpty()) break;
+                execute(tasks.get(0));
             }
         } catch (Exception e) {
             log.error("可靠任务扫描失败", e);
-        } finally {
-            lock.unlock();
         }
     }
 
     private void execute(ReliableTask task) {
         try {
-            if (ReliableTaskRepository.ORDER_TIMEOUT.equals(task.getTaskType())) {
-                producer.sendOrderTimeout(Long.valueOf(task.getPayload()));
+            if (ReliableTaskRepository.CREATE_RESERVATION.equals(task.getTaskType())) {
+                ReservationOrder request = JSONUtil.toBean(task.getPayload(), ReservationOrder.class);
+                requireSendOk(producer.sendOrderCreate(request), "CREATE", request.getId());
+            } else if (ReliableTaskRepository.ORDER_TIMEOUT.equals(task.getTaskType())) {
+                Long orderId = Long.valueOf(task.getPayload());
+                requireSendOk(producer.sendOrderTimeout(orderId), "TIMEOUT", orderId);
             } else if (ReliableTaskRepository.RESTORE_REDIS_STOCK.equals(task.getTaskType())) {
                 ReservationOrder order = JSONUtil.toBean(task.getPayload(), ReservationOrder.class);
                 Long result = redisTemplate.execute(
                         RESTORE_STOCK_SCRIPT,
                         Arrays.asList(RESERVATION_STOCK_KEY + order.getActivityPassId(), "reservation:restore:" + order.getId()),
-                        String.valueOf(RESTORE_MARKER_TTL_SECONDS),
                         String.valueOf(order.getActivityPassId()),
                         String.valueOf(order.getUserId()),
-                        String.valueOf(order.getId()));
+                        String.valueOf(order.getId()),
+                        String.valueOf(order.getResourceVersion() == null ? 0L : order.getResourceVersion()));
                 if (result == null || result < 0) {
-                    throw new IllegalStateException("Redis 限量预约库存尚未初始化");
+                    throw new IllegalStateException("Redis 库存回补校验失败, code=" + result);
                 }
             } else if (ReliableTaskRepository.TRANSFER_RESERVATION_CLAIM.equals(task.getTaskType())) {
                 ReservationClaimTransfer transfer = JSONUtil.toBean(
@@ -99,14 +112,15 @@ public class ReliableTaskScheduler {
                 Long result = redisTemplate.execute(
                         TRANSFER_RESERVATION_SCRIPT,
                         Arrays.asList("reservation:transfer:" + transfer.getOldOrderId()),
-                        String.valueOf(RESTORE_MARKER_TTL_SECONDS),
                         String.valueOf(transfer.getActivityPassId()),
                         String.valueOf(transfer.getOldUserId()),
                         String.valueOf(transfer.getOldOrderId()),
+                        String.valueOf(transfer.getOldResourceVersion()),
                         String.valueOf(transfer.getNewUserId()),
-                        String.valueOf(transfer.getNewOrderId()));
-                if (result == null) {
-                    throw new IllegalStateException("Redis 名额转移返回空");
+                        String.valueOf(transfer.getNewOrderId()),
+                        String.valueOf(transfer.getNewResourceVersion()));
+                if (result == null || result < 0) {
+                    throw new IllegalStateException("Redis 名额转移版本校验失败, code=" + result);
                 }
             } else if (ReliableTaskRepository.INIT_RESERVATION_STOCK.equals(task.getTaskType())) {
                 com.citypass.entity.LimitedPassStock pass = JSONUtil.toBean(
@@ -119,13 +133,34 @@ public class ReliableTaskScheduler {
                 if (result == null) {
                     throw new IllegalStateException("Redis 库存初始化返回空");
                 }
+            } else if (ReliableTaskRepository.INVALIDATE_VENUE_CACHE.equals(task.getTaskType())) {
+                VenueCacheInvalidation invalidation = JSONUtil.toBean(task.getPayload(), VenueCacheInvalidation.class);
+                venueCacheInvalidator.evict(invalidation.getVenueId(), invalidation.getCacheVersion());
             } else {
                 throw new IllegalArgumentException("未知可靠任务类型: " + task.getTaskType());
             }
-            repository.markDone(task.getId());
+            if (!repository.markDone(task)) {
+                log.warn("任务执行完成但租约已失效: id={}, version={}", task.getId(), task.getVersion());
+                return;
+            }
+            metrics.succeeded(task.getTaskType());
         } catch (Exception e) {
-            repository.markFailed(task.getId(), task.getRetryCount(), e.getMessage());
-            log.warn("可靠任务执行失败，稍后重试: id={}, type={}", task.getId(), task.getTaskType(), e);
+            ReliableTaskRepository.FailureDisposition disposition = repository.markFailed(task, e.getMessage());
+            if (disposition == ReliableTaskRepository.FailureDisposition.DEAD) {
+                metrics.dead(task.getTaskType());
+                log.error("可靠任务进入死信: id={}, type={}", task.getId(), task.getTaskType(), e);
+            } else if (disposition == ReliableTaskRepository.FailureDisposition.RETRY) {
+                metrics.retried(task.getTaskType());
+                log.warn("可靠任务执行失败，将指数退避重试: id={}, type={}", task.getId(), task.getTaskType(), e);
+            } else {
+                log.warn("可靠任务执行失败且已丢失租约: id={}, type={}", task.getId(), task.getTaskType(), e);
+            }
+        }
+    }
+
+    private void requireSendOk(SendResult result, String tag, Long id) {
+        if (result == null || result.getSendStatus() != SendStatus.SEND_OK) {
+            throw new IllegalStateException(tag + " 消息未被 Broker 确认: " + id);
         }
     }
 }

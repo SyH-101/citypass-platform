@@ -15,7 +15,7 @@ public interface IReservationService extends IService<ReservationOrder> {
 
     Result cancelWaitlist(Long requestId);
 
-    /** 取消超时未支付订单，并优先把名额补给候补用户。 */
+    /** 仅在 offer_expire_time 已到期时关闭未支付订单，并优先把名额补给候补用户。 */
     void cancelTimeoutOrder(Long orderId);
 
     /** MQ 异步处理预约请求（创建订单或加入候补，支持重复投递）。 */

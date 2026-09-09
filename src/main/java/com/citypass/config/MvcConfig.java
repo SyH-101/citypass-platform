@@ -25,7 +25,9 @@ public class MvcConfig implements WebMvcConfigurer {
                 .excludePathPatterns(
                         "/stories/hot",
                         "/user/code",
-                        "/user/login"
+                        "/user/login",
+                        "/actuator/**",
+                        "/internal/reliable-tasks/**"
                 ).order(1);
         registry.addInterceptor(slidingWindowInterceptor)
                 .addPathPatterns("/reservations/*")

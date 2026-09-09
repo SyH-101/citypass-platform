@@ -10,9 +10,9 @@ CityPass 是一个城市活动发现与限量名额预约平台。它面向展�
 - 城市动态：发布、热榜、点赞排行、滚动 Feed、创作者订阅、评论与作者信息聚合。
 - 用户体系：短信验证码登录、一次性验证码、Redis Token、滑动续期、签到位图。
 - 限量预约：OpenResty 总量令牌桶、用户滑动窗口、RocketMQ 削峰、Redis Lua 原子占位、MySQL 条件扣减。
-- 预约候补：MySQL 持久化 FIFO 队列、主动退出、取消或超时后的自动补位、资格支付截止时间。
-- 可靠性：有效订单唯一索引、支付/关单 CAS、本地可靠任务、Redis 幂等补偿、定时对账。
-- 缓存一致性：事务提交后驱逐本地与 Redis 缓存，可选 Canal 捕获绕过应用的数据库更新。
+- 预约候补：MySQL 严格 FIFO 队列、活动级串行点、异常候补跳过、名额版本化交接。
+- 可靠性：预约请求事实 + Transactional Outbox、支付/到期复合 CAS、任务级租约与版本栅栏、死信与手工重放、Micrometer 指标。
+- 缓存一致性：与场馆写入同事务保存失效 Outbox，Redis 版本水位阻止旧读回写，Pub/Sub 广播驱逐所有 JVM 的 Caffeine。
 
 ## 系统结构
 
@@ -34,11 +34,11 @@ flowchart LR
 
 ```text
 POST /reservations/{passId}
-  -> 写入 PROCESSING 请求状态
-  -> RocketMQ CREATE 消息
+  -> MySQL 同一事务：PROCESSING 请求事实 + CREATE Outbox
+  -> 多实例 Relay 以任务租约发布 RocketMQ CREATE 消息
   -> 消费者校验活动时间窗与有效订单
   -> Redis Lua 原子占位
-  -> MySQL 事务：条件扣库存 + 插入订单 + 写超时可靠任务
+  -> MySQL 事务：条件扣库存 + 订单 + 请求状态 + 真实截止时间任务
   -> RESERVED
 
 Redis 无库存且 acceptWaitlist=true
@@ -46,7 +46,7 @@ Redis 无库存且 acceptWaitlist=true
   -> WAITLISTED
 ```
 
-取消或超时关单时，事务先用 `status=1` 条件更新竞争订单终态。若存在候补者，按入口生成的单调 `request_id` 选出队首，原名额直接转给候补订单，数据库库存不变；候补为空或活动结束时才回补数据库库存。Redis 名额归属转移或库存回补由同一事务写入的可靠任务异步执行，可幂等重试。
+取消与超时关单使用不同的复合 CAS：超时路径必须同时命中 `status=1 AND offer_expire_time<=NOW()`。释放事务以活动库存行串行化，阻塞锁定真正队首，不会跳过被另一事务锁定的较早候补。Redis claim 以 `orderId:resourceVersion` 表示名额归属，只有期望版本匹配时才能交接或回补。
 
 ## 关键状态
 
@@ -92,6 +92,7 @@ docker compose ps
 ```text
 deploy/mysql/migration-v2.sql
 deploy/mysql/migration-v3-waitlist.sql
+deploy/mysql/migration-v4-reliability.sql
 ```
 
 可选的 Canal 缓存驱逐链路：
@@ -113,9 +114,11 @@ Docker 全链路测试：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke-test.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\reliability-test.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\cache-consistency-test.ps1
 ```
 
-脚本会创建临时用户和活动，实际验证匿名场馆读取、订阅、动态评论、直接预约、两级候补 FIFO、取消自动补位、候补支付、越权查询、支付 CAS、库存回补、取消后重新预约和活动时间窗拦截。
+`smoke-test.ps1` 覆盖主要业务功能。`reliability-test.ps1` 使用真实 MySQL、Redis 和 RocketMQ 验证 100 用户并发争抢 10 份库存、双释放补位、锁住队首时不跳号、Broker 故障恢复、支付/超时边界和 Lua 重试幂等。`cache-consistency-test.ps1` 额外启动第二个应用实例，验证广播失效与旧版本回写拒绝。
 
 ## 主要 API
 
@@ -134,7 +137,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke-test.ps1
 
 ## 学习顺序
 
-先读 [00-先读这里](docs/00-先读这里.md)，再按 [01-项目全景与代码地图](docs/01-项目全景与代码地图.md) 定位代码。预约与候补的核心推理在 [02-预约一致性与候补补位](docs/02-预约一致性与候补补位.md)，缓存与安全在 [03-缓存限流与安全](docs/03-缓存限流与安全.md)，面试表达和简历边界分别在 [04-面试讲法与追问](docs/04-面试讲法与追问.md) 与 [07-简历项目写法](docs/07-简历项目写法.md)。
+先读 [00-先读这里](docs/00-先读这里.md)，再按 [01-项目全景与代码地图](docs/01-项目全景与代码地图.md) 定位代码。预约与候补的核心推理在 [02-预约一致性与候补补位](docs/02-预约一致性与候补补位.md)，缓存与安全在 [03-缓存限流与安全](docs/03-缓存限流与安全.md)，面试表达和简历边界分别在 [04-面试讲法与追问](docs/04-面试讲法与追问.md) 与 [07-简历项目写法](docs/07-简历项目写法.md)。五项可靠性升级的最终代码与能力边界见 [08-v4 可靠性升级](docs/08-v4可靠性升级.md)。
 
 ## 工程演进说明
 

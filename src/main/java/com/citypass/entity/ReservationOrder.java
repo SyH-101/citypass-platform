@@ -80,6 +80,9 @@ public class ReservationOrder implements Serializable {
     /** 支付资格截止时间。 */
     private LocalDateTime offerExpireTime;
 
+    /** 同一个实体名额每完成一次候补交接就递增，用于校验 Redis 归属。 */
+    private Long resourceVersion;
+
     /** 请求库存不足时是否愿意进入候补，仅存在于 MQ 消息体。 */
     @TableField(exist = false)
     private Boolean acceptWaitlist;

@@ -28,6 +28,8 @@ public class ReservationWaitlist implements Serializable {
     private String status;
     private Long offeredOrderId;
     private LocalDateTime offerExpireTime;
+    private LocalDateTime waitExpireTime;
+    private String invalidReason;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
 }

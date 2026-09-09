@@ -7,10 +7,10 @@ import org.apache.ibatis.annotations.Select;
 
 public interface ReservationWaitlistMapper extends BaseMapper<ReservationWaitlist> {
 
-    /** 多笔订单同时释放名额时，每个事务会跳过已被锁定的候选人。 */
+    /** 阻塞锁定真正队首，不跳过正在处理的较早候补。 */
     @Select("SELECT * FROM tb_reservation_waitlist " +
             "WHERE activity_pass_id=#{activityPassId} AND status='WAITING' " +
-            "ORDER BY request_id LIMIT 1 FOR UPDATE SKIP LOCKED")
+            "ORDER BY request_id LIMIT 1 FOR UPDATE")
     ReservationWaitlist selectNextForUpdate(@Param("activityPassId") Long activityPassId);
 
     @Select("SELECT COUNT(*) FROM tb_reservation_waitlist " +

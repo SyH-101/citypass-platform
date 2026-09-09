@@ -12,6 +12,8 @@ public class ReservationClaimTransfer {
     private Long activityPassId;
     private Long oldUserId;
     private Long oldOrderId;
+    private Long oldResourceVersion;
     private Long newUserId;
     private Long newOrderId;
+    private Long newResourceVersion;
 }

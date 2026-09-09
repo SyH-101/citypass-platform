@@ -115,6 +115,7 @@ CREATE TABLE `tb_venue`  (
   `comments` int(10) UNSIGNED NOT NULL COMMENT '评论数量',
   `score` int(2) UNSIGNED NOT NULL COMMENT '评分，1~5分，乘10保存，避免小数',
   `open_hours` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL COMMENT '营业时间，例如 10:00-22:00',
+  `cache_version` bigint(20) UNSIGNED NOT NULL DEFAULT 0 COMMENT '缓存版本，防止旧读回写',
   `create_time` timestamp NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`) USING BTREE,
@@ -236,6 +237,7 @@ CREATE TABLE `tb_reservation_order`  (
   `source` varchar(16) NOT NULL DEFAULT 'DIRECT' COMMENT '名额来源：DIRECT / WAITLIST',
   `promotion_round` int(11) NOT NULL DEFAULT 0 COMMENT '名额补位轮次',
   `offer_expire_time` datetime NULL DEFAULT NULL COMMENT '支付资格截止时间',
+  `resource_version` bigint(20) UNSIGNED NOT NULL DEFAULT 0 COMMENT '名额归属版本',
   `create_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '下单时间',
   `pay_time` timestamp NULL DEFAULT NULL COMMENT '支付时间',
   `use_time` timestamp NULL DEFAULT NULL COMMENT '核销时间',
@@ -265,6 +267,8 @@ CREATE TABLE `tb_reservation_waitlist` (
   `status` varchar(16) NOT NULL DEFAULT 'WAITING' COMMENT 'WAITING/OFFERED/ACCEPTED/EXPIRED/CANCELLED',
   `offered_order_id` bigint(20) NULL DEFAULT NULL COMMENT '补位生成的订单号',
   `offer_expire_time` datetime NULL DEFAULT NULL COMMENT '候补资格确认截止时间',
+  `wait_expire_time` datetime NULL DEFAULT NULL COMMENT '候补最晚有效时间',
+  `invalid_reason` varchar(128) NULL DEFAULT NULL COMMENT '跳过异常候补的原因',
   `create_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `update_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `active_user_id` bigint(20) GENERATED ALWAYS AS (
@@ -277,23 +281,46 @@ CREATE TABLE `tb_reservation_waitlist` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='限量活动候补队列';
 
 -- ----------------------------
+-- Durable reservation request fact + CREATE outbox source
+-- ----------------------------
+DROP TABLE IF EXISTS `tb_reservation_request`;
+CREATE TABLE `tb_reservation_request` (
+  `request_id` bigint(20) NOT NULL COMMENT '客户端轮询的请求号',
+  `user_id` bigint(20) UNSIGNED NOT NULL,
+  `activity_pass_id` bigint(20) UNSIGNED NOT NULL,
+  `accept_waitlist` tinyint(1) NOT NULL DEFAULT 1,
+  `status` varchar(32) NOT NULL DEFAULT 'PROCESSING',
+  `order_id` bigint(20) NULL DEFAULT NULL,
+  `last_error` varchar(500) NULL DEFAULT NULL,
+  `create_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `update_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`request_id`),
+  KEY `idx_request_owner` (`user_id`,`request_id`),
+  KEY `idx_request_status` (`status`,`update_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='预约请求事实表';
+
+-- ----------------------------
 -- Local reliable tasks (transactional outbox / Redis compensation)
 -- ----------------------------
 DROP TABLE IF EXISTS `tb_reliable_task`;
 CREATE TABLE `tb_reliable_task` (
   `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
-  `task_type` varchar(64) NOT NULL COMMENT 'ORDER_TIMEOUT / RESTORE_REDIS_STOCK / INIT_RESERVATION_STOCK / TRANSFER_RESERVATION_CLAIM',
+  `task_type` varchar(64) NOT NULL COMMENT 'CREATE_RESERVATION / ORDER_TIMEOUT / Redis补偿 / 缓存失效',
   `biz_key` varchar(128) NOT NULL COMMENT '业务幂等键',
   `payload` varchar(2048) NOT NULL,
   `status` varchar(16) NOT NULL DEFAULT 'PENDING',
   `retry_count` int(11) NOT NULL DEFAULT 0,
+  `max_retry` int(11) NOT NULL DEFAULT 12,
   `next_retry_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `locked_by` varchar(64) DEFAULT NULL,
+  `lease_until` datetime DEFAULT NULL,
+  `version` bigint(20) UNSIGNED NOT NULL DEFAULT 0,
   `last_error` varchar(500) DEFAULT NULL,
   `create_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `update_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_reliable_task_biz_key` (`biz_key`),
-  KEY `idx_reliable_task_scan` (`status`,`next_retry_time`)
+  KEY `idx_reliable_task_scan` (`status`,`next_retry_time`,`lease_until`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='本地可靠任务/事务发件箱';
 
 SET FOREIGN_KEY_CHECKS = 1;

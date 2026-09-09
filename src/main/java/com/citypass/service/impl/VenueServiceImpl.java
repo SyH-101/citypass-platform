@@ -9,7 +9,9 @@ import com.citypass.mapper.VenueMapper;
 import com.citypass.service.IVenueService;
 import com.citypass.utils.CacheClient;
 import com.citypass.utils.MultiLevelCacheService;
-import com.citypass.utils.VenueCacheInvalidator;
+import com.citypass.reliable.ReliableTaskRepository;
+import com.citypass.reliable.VenueCacheInvalidation;
+import cn.hutool.json.JSONUtil;
 import com.citypass.utils.SystemConstants;
 import org.springframework.data.geo.Distance;
 import org.springframework.data.geo.GeoResult;
@@ -47,7 +49,7 @@ public class VenueServiceImpl extends ServiceImpl<VenueMapper, Venue> implements
     private MultiLevelCacheService multiLevelCache;
 
     @Resource
-    private VenueCacheInvalidator venueCacheInvalidator;
+    private ReliableTaskRepository reliableTaskRepository;
 
     @Override
     public Result queryById(Long id) {
@@ -67,7 +69,7 @@ public class VenueServiceImpl extends ServiceImpl<VenueMapper, Venue> implements
     @Override
     public Result queryByIdRedisBaseline(Long id) {
         Venue venue = cacheClient
-                .queryWithPassThrough(CACHE_VENUE_KEY, id, Venue.class, this::getById, CACHE_VENUE_TTL, TimeUnit.MINUTES);
+                .queryWithPassThrough(CACHE_VENUE_BASELINE_KEY, id, Venue.class, this::getById, CACHE_VENUE_TTL, TimeUnit.MINUTES);
         if (venue == null) {
             return Result.fail("场馆不存在！");
         }
@@ -86,8 +88,14 @@ public class VenueServiceImpl extends ServiceImpl<VenueMapper, Venue> implements
         if (!updated) {
             return Result.fail("场馆不存在或更新失败");
         }
-        // 事务提交后再删，避免未提交数据被并发查询重新写回缓存。
-        venueCacheInvalidator.evictAfterCommit(id);
+        if (getBaseMapper().incrementCacheVersion(id) != 1) {
+            throw new IllegalStateException("场馆缓存版本更新失败");
+        }
+        Venue refreshed = getById(id);
+        reliableTaskRepository.enqueue(
+                ReliableTaskRepository.INVALIDATE_VENUE_CACHE,
+                "invalidate-venue-cache:" + id + ":" + refreshed.getCacheVersion(),
+                JSONUtil.toJsonStr(new VenueCacheInvalidation(id, refreshed.getCacheVersion())));
         return Result.ok();
     }
 

@@ -4,9 +4,12 @@ import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.citypass.entity.LimitedPassStock;
 import com.citypass.entity.ReservationOrder;
 import com.citypass.entity.ReservationWaitlist;
+import com.citypass.entity.ReservationRequest;
 import com.citypass.mapper.LimitedPassStockMapper;
 import com.citypass.mapper.ReservationOrderMapper;
 import com.citypass.mapper.ReservationWaitlistMapper;
+import com.citypass.mapper.ReservationRequestMapper;
+import com.citypass.reliable.ReliableTaskMetrics;
 import com.citypass.reliable.ReliableTaskRepository;
 import com.citypass.utils.ReservationStatus;
 import org.junit.jupiter.api.BeforeEach;
@@ -25,6 +28,8 @@ class ReservationTransactionalServiceTest {
     private ReservationWaitlistMapper waitlistMapper;
     private LimitedPassStockMapper stockMapper;
     private ReliableTaskRepository taskRepository;
+    private ReservationRequestMapper requestMapper;
+    private ReliableTaskMetrics metrics;
     private ReservationTransactionalService service;
 
     @BeforeEach
@@ -33,8 +38,13 @@ class ReservationTransactionalServiceTest {
         waitlistMapper = mock(ReservationWaitlistMapper.class);
         stockMapper = mock(LimitedPassStockMapper.class);
         taskRepository = mock(ReliableTaskRepository.class);
+        requestMapper = mock(ReservationRequestMapper.class);
+        metrics = mock(ReliableTaskMetrics.class);
+        when(requestMapper.selectById(anyLong())).thenAnswer(invocation -> new ReservationRequest()
+                .setRequestId(invocation.getArgument(0)).setStatus(ReservationStatus.PROCESSING));
+        when(requestMapper.update(isNull(), any(UpdateWrapper.class))).thenReturn(1);
         service = new ReservationTransactionalService(
-                orderMapper, waitlistMapper, stockMapper, taskRepository);
+                orderMapper, waitlistMapper, stockMapper, requestMapper, taskRepository, metrics);
     }
 
     @Test
@@ -50,8 +60,8 @@ class ReservationTransactionalServiceTest {
         assertEquals(ReservationStatus.SOURCE_DIRECT, order.getSource());
         assertNotNull(order.getOfferExpireTime());
         verify(orderMapper).insert(order);
-        verify(taskRepository).enqueue(
-                ReliableTaskRepository.ORDER_TIMEOUT, "order-timeout:10", "10");
+        verify(taskRepository).enqueueAt(
+                eq(ReliableTaskRepository.ORDER_TIMEOUT), eq("order-timeout:10"), eq("10"), any(LocalDateTime.class));
     }
 
     @Test
@@ -86,7 +96,7 @@ class ReservationTransactionalServiceTest {
         ReservationOrder old = directOrder();
         when(orderMapper.selectById(10L)).thenReturn(old);
         when(orderMapper.update(isNull(), any(UpdateWrapper.class))).thenReturn(1);
-        when(stockMapper.selectById(30L)).thenReturn(activePass());
+        when(stockMapper.selectByIdForUpdate(30L)).thenReturn(activePass());
         when(waitlistMapper.selectNextForUpdate(30L)).thenReturn(null);
         when(stockMapper.update(isNull(), any(UpdateWrapper.class))).thenReturn(1);
 
@@ -106,7 +116,7 @@ class ReservationTransactionalServiceTest {
                 .setStatus(ReservationStatus.WAITING);
         when(orderMapper.selectById(10L)).thenReturn(old);
         when(orderMapper.update(isNull(), any(UpdateWrapper.class))).thenReturn(1);
-        when(stockMapper.selectById(30L)).thenReturn(activePass());
+        when(stockMapper.selectByIdForUpdate(30L)).thenReturn(activePass());
         when(waitlistMapper.selectNextForUpdate(30L)).thenReturn(first);
         when(waitlistMapper.update(isNull(), any(UpdateWrapper.class))).thenReturn(1);
         when(orderMapper.insert(any(ReservationOrder.class))).thenReturn(1);
@@ -118,8 +128,8 @@ class ReservationTransactionalServiceTest {
         assertEquals(99L, result.getPromotedOrder().getId());
         assertEquals(1, result.getPromotedOrder().getPromotionRound());
         verify(stockMapper, never()).update(isNull(), any(UpdateWrapper.class));
-        verify(taskRepository).enqueue(eq(ReliableTaskRepository.ORDER_TIMEOUT),
-                eq("order-timeout:99"), eq("99"));
+        verify(taskRepository).enqueueAt(eq(ReliableTaskRepository.ORDER_TIMEOUT),
+                eq("order-timeout:99"), eq("99"), any(LocalDateTime.class));
         verify(taskRepository).enqueue(eq(ReliableTaskRepository.TRANSFER_RESERVATION_CLAIM),
                 eq("transfer-reservation:10"), contains("\"newOrderId\":99"));
     }
@@ -137,6 +147,19 @@ class ReservationTransactionalServiceTest {
 
         assertTrue(service.payUnpaidOrder(99L, 88L));
         verify(waitlistMapper).update(isNull(), any(UpdateWrapper.class));
+    }
+
+    @Test
+    void staleCreateDeliveryCannotRegressTerminalRequestState() {
+        reset(requestMapper);
+        when(requestMapper.selectById(10L)).thenReturn(new ReservationRequest()
+                .setRequestId(10L).setStatus(ReservationStatus.CANCELLED));
+
+        String effective = service.markRequestState(
+                10L, ReservationStatus.RESERVED, 10L, null);
+
+        assertEquals(ReservationStatus.CANCELLED, effective);
+        verify(requestMapper, never()).update(isNull(), any(UpdateWrapper.class));
     }
 
     private ReservationOrder directOrder() {

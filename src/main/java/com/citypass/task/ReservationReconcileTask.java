@@ -3,10 +3,11 @@ package com.citypass.task;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.citypass.entity.LimitedPassStock;
 import com.citypass.entity.ReservationOrder;
-import com.citypass.mq.OrderMessagePublisher;
+import com.citypass.entity.ReservationWaitlist;
+import com.citypass.mapper.ReservationWaitlistMapper;
 import com.citypass.service.ILimitedPassStockService;
 import com.citypass.service.IReservationService;
-import com.citypass.utils.RedisIdWorker;
+import com.citypass.service.impl.ReservationTransactionalService;
 import com.citypass.utils.RedisConstants;
 
 import static com.citypass.utils.RedisConstants.RESERVATION_STOCK_KEY;
@@ -22,8 +23,7 @@ import org.springframework.stereotype.Component;
 import javax.annotation.Resource;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Set;
-import java.util.stream.Collectors;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 
 /**
  * 限量预约对账任务：兜底 MQ 消息丢失与库存漂移
@@ -46,9 +46,9 @@ public class ReservationReconcileTask {
     @Resource
     private RedissonClient redissonClient;
     @Resource
-    private OrderMessagePublisher rocketMQProducer;
+    private ReservationWaitlistMapper waitlistMapper;
     @Resource
-    private RedisIdWorker redisIdWorker;
+    private ReservationTransactionalService transactionalService;
 
     /** 限量预约结束多久后允许重算库存（等待消费队列排空） */
     private static final int RECONCILE_AFTER_END_MINUTES = 2;
@@ -65,7 +65,7 @@ public class ReservationReconcileTask {
         }
         try {
             closeTimeoutOrders();
-            supplementMissingOrders();
+            expireFinishedWaiters();
             reconcileFinishedStocks();
         } catch (Exception e) {
             log.error("限量预约对账任务执行异常", e);
@@ -92,56 +92,22 @@ public class ReservationReconcileTask {
         }
     }
 
-    /**
-     * ② 补单：兜 CREATE 消息丢失（Redis 已扣库存、订单表缺失）。
-     * 只对已结束的券执行——进行中的限量预约，claim 后消费者存在秒级落库延迟，
-     * 对账过早跑差集会误判丢单（白打 MQ、日志误报）。
-     * reservation:holders:{activityPassId}（Lua claim 用户）与订单表已落库用户的差集 = 丢单；
-     * 重新发号补发 CREATE 消息，消费者幂等链（锁→count→唯一索引）保证不重复建单。
-     */
-    private void supplementMissingOrders() {
-        List<LimitedPassStock> passes = limitedPassStockService.lambdaQuery()
-                .lt(LimitedPassStock::getEndTime, LocalDateTime.now())
-                .list();
-        for (LimitedPassStock pass : passes) {
-            Long activityPassId = pass.getActivityPassId();
-            Set<String> claimed = stringRedisTemplate.opsForSet()
-                    .members(RedisConstants.RESERVATION_HOLDER_KEY + activityPassId);
-            if (claimed == null || claimed.isEmpty()) {
-                continue;
-            }
-            List<ReservationOrder> created = reservationService.lambdaQuery()
-                    .select(ReservationOrder::getUserId)
-                    .eq(ReservationOrder::getActivityPassId, activityPassId)
-                    .list();
-            Set<String> createdSet = created.stream()
-                    .map(o -> String.valueOf(o.getUserId()))
-                    .collect(Collectors.toSet());
-
-            for (String userId : claimed) {
-                if (createdSet.contains(userId)) {
-                    continue;
-                }
-                ReservationOrder order = new ReservationOrder();
-                String claimedOrderId = stringRedisTemplate.opsForValue().get(
-                        RedisConstants.RESERVATION_CLAIM_KEY + activityPassId + ":" + userId);
-                order.setId(claimedOrderId == null
-                        ? redisIdWorker.nextId("order") : Long.valueOf(claimedOrderId));
-                order.setUserId(Long.valueOf(userId));
-                order.setActivityPassId(activityPassId);
-                try {
-                    rocketMQProducer.sendOrderCreate(order);
-                    log.warn("对账补单：activityPassId={}, userId={}, 新订单号={}", activityPassId, userId, order.getId());
-                } catch (Exception e) {
-                    // 发送失败不抛异常，下轮对账再次尝试；消费者幂等，重复补发安全
-                    log.error("对账补单发送失败，activityPassId={}, userId={}", activityPassId, userId, e);
-                }
-            }
+    /** ② 活动结束后关闭尚未补位的 WAITING 记录，同步请求事实状态。 */
+    private void expireFinishedWaiters() {
+        List<ReservationWaitlist> expired = waitlistMapper.selectList(
+                new QueryWrapper<ReservationWaitlist>()
+                        .eq("status", com.citypass.utils.ReservationStatus.WAITING)
+                        .le("wait_expire_time", LocalDateTime.now())
+                        .last("LIMIT 500"));
+        int changed = 0;
+        for (ReservationWaitlist waiter : expired) {
+            if (transactionalService.expireWaiting(waiter.getRequestId())) changed++;
         }
+        if (changed > 0) log.info("对账关闭已结束活动的候补记录: {}", changed);
     }
 
     /**
-     * ③ 库存重算：只对已结束（且结束超过 2 分钟，队列基本排空）的券。
+     * ③ 库存重算：只对已结束（且结束超过 2 分钟）的通行证。
      * expected = initial_stock − 有效订单数(未支付+已支付)，Redis 与 DB 一起改写为 expected。
      * 预期值只来自订单表账本，不存在"修错方向"；每轮收敛，重复执行安全。
      * Redis 与 DB 均已一致则跳过写库。

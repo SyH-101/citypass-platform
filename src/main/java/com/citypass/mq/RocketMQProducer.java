@@ -52,16 +52,16 @@ public class RocketMQProducer implements OrderMessagePublisher {
     }
 
     @Override
-    public void sendOrderTimeout(Long orderId)
+    public SendResult sendOrderTimeout(Long orderId)
             throws MQClientException, MQBrokerException, RemotingException, InterruptedException {
         Message message = new Message(
                 RocketMQConstants.ORDER_TOPIC,
                 RocketMQConstants.ORDER_TAG_TIMEOUT,
                 orderId.toString().getBytes(StandardCharsets.UTF_8));
-        message.setDelayTimeLevel(RocketMQConstants.ORDER_TIMEOUT_DELAY_LEVEL);
-        producer.send(message);
-        log.debug("预约超时消息发送成功, orderId={}, delayLevel={}",
-                orderId, RocketMQConstants.ORDER_TIMEOUT_DELAY_LEVEL);
+        // 任务的 next_retry_time 已经是真实 offerExpireTime，到期后发送普通消息。
+        SendResult result = producer.send(message);
+        log.debug("预约超时检查消息发送成功, orderId={}, msgId={}", orderId, result.getMsgId());
+        return result;
     }
 
     @PreDestroy

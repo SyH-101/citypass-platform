@@ -2,165 +2,128 @@ package com.citypass.utils;
 
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
+import com.citypass.entity.Venue;
 import com.github.benmanes.caffeine.cache.Cache;
+import lombok.AllArgsConstructor;
+import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.PreDestroy;
 import javax.annotation.Resource;
 import java.time.LocalDateTime;
-import java.util.Random;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
-import static com.citypass.utils.RedisConstants.*;
+import static com.citypass.utils.RedisConstants.CACHE_NULL_TTL;
+import static com.citypass.utils.RedisConstants.CACHE_VENUE_VERSION_KEY;
+import static com.citypass.utils.RedisConstants.LOCK_VENUE_KEY;
 
-/**
- * 多级缓存服务：Caffeine（一级）→ Redis（二级）→ MySQL（三级）
- *
- * <pre>
- *   命中率递减、速度递减、成本递减
- *   Caffeine 纳秒级（JVM 内存）
- *   → Redis 毫秒级（网络 IO）
- *   → MySQL 毫秒~秒级（磁盘 IO）
- * </pre>
- */
+/** Caffeine -> Redis -> MySQL cache with version-checked asynchronous rebuilds. */
 @Slf4j
 @Component
 public class MultiLevelCacheService {
 
-    @Resource
-    private StringRedisTemplate stringRedisTemplate;
+    @Data
+    @AllArgsConstructor
+    private static class LocalEntry {
+        private Object data;
+        private long version;
+    }
 
-    @Resource
-    private Cache<String, Object> venueLocalCache;
+    @Resource private StringRedisTemplate stringRedisTemplate;
+    @Resource private Cache<String, Object> venueLocalCache;
 
-    /** 逻辑过期异步重建线程池 */
     private final ExecutorService rebuildExecutor = Executors.newFixedThreadPool(10, r -> {
         Thread thread = new Thread(r, "venue-cache-rebuild");
         thread.setDaemon(true);
         return thread;
     });
 
-    private static final DefaultRedisScript<Long> UNLOCK_SCRIPT;
-
-    static {
-        UNLOCK_SCRIPT = new DefaultRedisScript<>();
-        UNLOCK_SCRIPT.setLocation(new ClassPathResource("unlock.lua"));
-        UNLOCK_SCRIPT.setResultType(Long.class);
-    }
-
-    /** 随机 TTL 因子，避免缓存雪崩 */
+    private static final DefaultRedisScript<Long> UNLOCK_SCRIPT = new DefaultRedisScript<>();
+    private static final DefaultRedisScript<Long> WRITE_IF_VERSION_SCRIPT = new DefaultRedisScript<>();
     private static final Random RANDOM = new Random();
 
-    // ==================== 公开 API ====================
+    static {
+        UNLOCK_SCRIPT.setLocation(new ClassPathResource("unlock.lua"));
+        UNLOCK_SCRIPT.setResultType(Long.class);
+        WRITE_IF_VERSION_SCRIPT.setLocation(new ClassPathResource("write-cache-if-version.lua"));
+        WRITE_IF_VERSION_SCRIPT.setResultType(Long.class);
+    }
 
-    /**
-     * 多级缓存查询（穿透保护 + 逻辑过期防击穿）
-     *
-     * @param keyPrefix Redis key 前缀
-     * @param id        业务 ID
-     * @param type      返回类型
-     * @param dbFallback 查库函数
-     * @param ttl       缓存时间
-     * @param unit      时间单位
-     */
     @SuppressWarnings("unchecked")
-    public <R, ID> R queryWithMultiLevel(
-            String keyPrefix, ID id, Class<R> type,
-            Function<ID, R> dbFallback, Long ttl, TimeUnit unit) {
-
+    public <R, ID> R queryWithMultiLevel(String keyPrefix, ID id, Class<R> type,
+                                         Function<ID, R> dbFallback, Long ttl, TimeUnit unit) {
         String cacheKey = keyPrefix + id;
-
-        // ── 第一层：Caffeine 本地缓存 ──
-        R local = (R) venueLocalCache.getIfPresent(cacheKey);
-        if (local != null) {
+        Object cached = venueLocalCache.getIfPresent(cacheKey);
+        if (cached instanceof LocalEntry) {
             log.debug("[多级缓存] L1 Caffeine 命中: {}", cacheKey);
-            return local;
+            return (R) ((LocalEntry) cached).getData();
         }
 
-        // ── 第二层：Redis ──
-        String json = stringRedisTemplate.opsForValue().get(cacheKey);
-        if (StrUtil.isNotBlank(json)) {
-            // 检查逻辑过期
-            RedisData redisData = JSONUtil.toBean(json, RedisData.class);
-            R data = JSONUtil.toBean((cn.hutool.json.JSONObject) redisData.getData(), type);
-            LocalDateTime expireTime = redisData.getExpireTime();
-
-            if (expireTime.isAfter(LocalDateTime.now())) {
-                // 未过期 → 写回 Caffeine，返回
-                venueLocalCache.put(cacheKey, data);
+        RedisData redisData = readRedis(cacheKey);
+        if (redisData != null) {
+            if (Boolean.TRUE.equals(redisData.getNullValue())) return null;
+            R data = convert(redisData, type);
+            long version = redisData.getVersion() == null ? 0L : redisData.getVersion();
+            if (redisData.getExpireTime() != null && redisData.getExpireTime().isAfter(LocalDateTime.now())) {
+                venueLocalCache.put(cacheKey, new LocalEntry(data, version));
                 log.debug("[多级缓存] L2 Redis 命中: {}", cacheKey);
                 return data;
             }
-
-            // 逻辑过期 → 异步重建
             rebuildAsync(keyPrefix, id, dbFallback, ttl, unit);
-            // 当前请求可返回旧数据，但不能把过期值重新塞回 L1；重建线程会写入新值。
             return data;
         }
 
-        // 空值防穿透
-        if (json != null) {
-            return null;
-        }
-
-        // ── 第三层：查 MySQL（互斥锁防击穿）──
         R result = queryWithMutexLock(keyPrefix, id, type, dbFallback, ttl, unit);
-        if (result != null) {
-            venueLocalCache.put(cacheKey, result);
-        }
+        if (result != null) venueLocalCache.put(cacheKey, new LocalEntry(result, versionOf(result)));
         return result;
     }
 
-    /**
-     * 删除所有级别的缓存（写操作时调用）
-     */
-    public void evict(String keyPrefix, Object id) {
-        String key = keyPrefix + id;
-        venueLocalCache.invalidate(key);
-        stringRedisTemplate.delete(key);
-        log.debug("[多级缓存] 已清除: {}", key);
+    public void evictLocal(String keyPrefix, Object id) {
+        venueLocalCache.invalidate(keyPrefix + id);
     }
 
-    // ==================== 内部实现 ====================
+    /** Compatibility helper for callers that own no versioned invalidation workflow. */
+    public void evict(String keyPrefix, Object id) {
+        evictLocal(keyPrefix, id);
+        stringRedisTemplate.delete(keyPrefix + id);
+    }
 
-    /**
-     * SETNX 互斥锁查库
-     */
-    private <R, ID> R queryWithMutexLock(
-            String keyPrefix, ID id, Class<R> type,
-            Function<ID, R> dbFallback, Long ttl, TimeUnit unit) {
-
+    private <R, ID> R queryWithMutexLock(String keyPrefix, ID id, Class<R> type,
+                                         Function<ID, R> dbFallback, Long ttl, TimeUnit unit) {
         String key = keyPrefix + id;
         String lockKey = LOCK_VENUE_KEY + id;
-
         for (int attempt = 0; attempt < 20; attempt++) {
             String token = tryLock(lockKey);
             if (token != null) {
                 try {
-                    String json = stringRedisTemplate.opsForValue().get(key);
-                    if (StrUtil.isNotBlank(json)) {
-                        RedisData redisData = JSONUtil.toBean(json, RedisData.class);
-                        return JSONUtil.toBean((cn.hutool.json.JSONObject) redisData.getData(), type);
-                    }
-                    if (json != null) {
-                        return null;
+                    RedisData doubleChecked = readRedis(key);
+                    if (doubleChecked != null) {
+                        if (Boolean.TRUE.equals(doubleChecked.getNullValue())) return null;
+                        return convert(doubleChecked, type);
                     }
                     R result = dbFallback.apply(id);
                     if (result == null) {
-                        long randomTtl = CACHE_NULL_TTL + RANDOM.nextInt(3);
-                        stringRedisTemplate.opsForValue().set(key, "", randomTtl, TimeUnit.MINUTES);
+                        // No create flow exists for venues; a short null marker is sufficient for penetration control.
+                        RedisData nullData = new RedisData();
+                        nullData.setNullValue(true);
+                        nullData.setVersion(currentVersion(id));
+                        nullData.setExpireTime(LocalDateTime.now().plusMinutes(CACHE_NULL_TTL));
+                        stringRedisTemplate.opsForValue().set(
+                                key, JSONUtil.toJsonStr(nullData), CACHE_NULL_TTL, TimeUnit.MINUTES);
                         return null;
                     }
-                    writeWithLogicalExpire(key, result, ttl, unit);
+                    writeWithLogicalExpire(key, id, result, ttl, unit);
                     return result;
                 } finally {
                     unlock(lockKey, token);
@@ -172,41 +135,32 @@ public class MultiLevelCacheService {
                 Thread.currentThread().interrupt();
                 return dbFallback.apply(id);
             }
-            String json = stringRedisTemplate.opsForValue().get(key);
-            if (StrUtil.isNotBlank(json)) {
-                RedisData redisData = JSONUtil.toBean(json, RedisData.class);
-                return JSONUtil.toBean((cn.hutool.json.JSONObject) redisData.getData(), type);
-            }
-            if (json != null) {
-                return null;
+            RedisData refreshed = readRedis(key);
+            if (refreshed != null) {
+                if (Boolean.TRUE.equals(refreshed.getNullValue())) return null;
+                return convert(refreshed, type);
             }
         }
         log.warn("缓存互斥锁等待超时，降级查询数据库: {}", key);
         return dbFallback.apply(id);
     }
 
-    /**
-     * 异步重建过期缓存
-     */
-    private <R, ID> void rebuildAsync(
-            String keyPrefix, ID id, Function<ID, R> dbFallback, Long ttl, TimeUnit unit) {
-
+    private <R, ID> void rebuildAsync(String keyPrefix, ID id, Function<ID, R> dbFallback,
+                                      Long ttl, TimeUnit unit) {
         String lockKey = LOCK_VENUE_KEY + id;
         String token = tryLock(lockKey);
-        if (token == null) return; // 已经有别的线程在重建
-
+        if (token == null) return;
         try {
             rebuildExecutor.submit(() -> {
                 try {
                     R data = dbFallback.apply(id);
-                    if (data != null) {
-                        writeWithLogicalExpire(keyPrefix + id, data, ttl, unit);
-                        venueLocalCache.put(keyPrefix + id, data);
+                    if (data != null && writeWithLogicalExpire(keyPrefix + id, id, data, ttl, unit)) {
+                        venueLocalCache.put(keyPrefix + id, new LocalEntry(data, versionOf(data)));
                     } else {
-                        stringRedisTemplate.opsForValue().set(
-                                keyPrefix + id, "", CACHE_NULL_TTL, TimeUnit.MINUTES);
                         venueLocalCache.invalidate(keyPrefix + id);
                     }
+                } catch (RuntimeException e) {
+                    log.error("异步重建场馆缓存失败: {}", id, e);
                 } finally {
                     unlock(lockKey, token);
                 }
@@ -217,21 +171,49 @@ public class MultiLevelCacheService {
         }
     }
 
-    /**
-     * 写入 Redis，带逻辑过期时间戳
-     */
-    private void writeWithLogicalExpire(String key, Object value, Long ttl, TimeUnit unit) {
+    /** Redis Lua compares the DB row version with the invalidation watermark before accepting a write. */
+    private boolean writeWithLogicalExpire(String key, Object id, Object value, Long ttl, TimeUnit unit) {
+        long baseSec = Math.max(1L, unit.toSeconds(ttl));
+        long jitter = (long) (baseSec * 0.2 * RANDOM.nextDouble());
+        long logicalTtlSeconds = baseSec + jitter;
+        long physicalTtlSeconds = Math.max(logicalTtlSeconds * 2, logicalTtlSeconds + 3600);
+
         RedisData redisData = new RedisData();
         redisData.setData(value);
-        // 随机 TTL ± 20%，避免同时过期引发雪崩
-        long baseSec = unit.toSeconds(ttl);
-        long jitter = (long) (baseSec * 0.2 * RANDOM.nextDouble());
-        long logicalTtlSeconds = Math.max(1, baseSec + jitter);
+        redisData.setVersion(versionOf(value));
         redisData.setExpireTime(LocalDateTime.now().plusSeconds(logicalTtlSeconds));
-        // 逻辑过期用于平滑重建，物理过期是故障兜底，避免永久脏数据。
-        long physicalTtlSeconds = Math.max(logicalTtlSeconds * 2, logicalTtlSeconds + 3600);
-        stringRedisTemplate.opsForValue().set(
-                key, JSONUtil.toJsonStr(redisData), physicalTtlSeconds, TimeUnit.SECONDS);
+        Long written = stringRedisTemplate.execute(
+                WRITE_IF_VERSION_SCRIPT,
+                Arrays.asList(key, CACHE_VENUE_VERSION_KEY + id),
+                String.valueOf(redisData.getVersion()), JSONUtil.toJsonStr(redisData),
+                String.valueOf(physicalTtlSeconds));
+        return Long.valueOf(1L).equals(written);
+    }
+
+    private RedisData readRedis(String key) {
+        String json = stringRedisTemplate.opsForValue().get(key);
+        if (StrUtil.isBlank(json)) return null;
+        return JSONUtil.toBean(json, RedisData.class);
+    }
+
+    @SuppressWarnings("unchecked")
+    private <R> R convert(RedisData redisData, Class<R> type) {
+        if (redisData.getData() == null) return null;
+        if (type.isInstance(redisData.getData())) return (R) redisData.getData();
+        return JSONUtil.toBean(JSONUtil.parseObj(redisData.getData()), type);
+    }
+
+    private long versionOf(Object value) {
+        if (value instanceof Venue) {
+            Long version = ((Venue) value).getCacheVersion();
+            return version == null ? 0L : version;
+        }
+        return 0L;
+    }
+
+    private long currentVersion(Object id) {
+        String raw = stringRedisTemplate.opsForValue().get(CACHE_VENUE_VERSION_KEY + id);
+        return raw == null ? 0L : Long.parseLong(raw);
     }
 
     private String tryLock(String key) {

@@ -2,6 +2,7 @@ package com.citypass.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
@@ -101,6 +102,10 @@ public class Venue implements Serializable {
      * 更新时间
      */
     private LocalDateTime updateTime;
+
+    /** 每次业务写入递增，缓存重建只能写回同版本或更新版本的数据。 */
+    @TableField(updateStrategy = FieldStrategy.NEVER)
+    private Long cacheVersion;
 
 
     @TableField(exist = false)

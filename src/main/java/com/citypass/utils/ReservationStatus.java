@@ -11,6 +11,7 @@ public final class ReservationStatus {
     public static final String WAITLISTED = "WAITLISTED";
     public static final String PAID = "PAID";
     public static final String CANCELLED = "CANCELLED";
+    public static final String EXPIRED = "EXPIRED";
     public static final String FAIL_STOCK = "FAIL_STOCK";
     public static final String FAIL_REPEAT = "FAIL_REPEAT";
     public static final String FAIL_SYSTEM = "FAIL_SYSTEM";
@@ -21,7 +22,6 @@ public final class ReservationStatus {
     public static final String WAITING = "WAITING";
     public static final String OFFERED = "OFFERED";
     public static final String ACCEPTED = "ACCEPTED";
-    public static final String EXPIRED = "EXPIRED";
 
     public static final String SOURCE_DIRECT = "DIRECT";
     public static final String SOURCE_WAITLIST = "WAITLIST";

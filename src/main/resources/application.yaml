@@ -40,6 +40,10 @@ gateway-cache:
 reliable-task:
   enabled: ${RELIABLE_TASK_ENABLED:true}
   fixed-delay-ms: 1000
+  batch-size: 50
+  lease-seconds: 30
+  max-retry: 12
+  admin-token: ${RELIABLE_TASK_ADMIN_TOKEN:}
 reservation:
   offer-minutes: ${RESERVATION_OFFER_MINUTES:15}
   reconcile:
@@ -50,6 +54,11 @@ reservation:
       enabled: true
       window-ms: 1000      # 窗口 1 秒
       max-requests: 5      # 同一用户窗口内最多 5 次预约请求
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
 logging:
   level:
     com.citypass: info
