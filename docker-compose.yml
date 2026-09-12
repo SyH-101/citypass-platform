@@ -37,6 +37,26 @@ services:
       timeout: 3s
       retries: 20
 
+  elasticsearch:
+    build:
+      context: .
+      dockerfile: deploy/elasticsearch/Dockerfile
+    profiles: ["search"]
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      action.auto_create_index: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9200/_cluster/health >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+
   namesrv:
     image: apache/rocketmq:4.9.7
     command: sh mqnamesrv
@@ -86,6 +106,10 @@ services:
       GATEWAY_CACHE_PURGE_URL: http://openresty/internal/cache/venue
       CANAL_ENABLED: "${CANAL_ENABLED:-false}"
       RELIABLE_TASK_ADMIN_TOKEN: "${RELIABLE_TASK_ADMIN_TOKEN:-}"
+      SEARCH_ENABLED: "${SEARCH_ENABLED:-false}"
+      SEARCH_HOSTS: http://elasticsearch:9200
+      SEARCH_CURSOR_SECRET: "${SEARCH_CURSOR_SECRET:-}"
+      SEARCH_PIT_KEEP_ALIVE_SECONDS: "${SEARCH_PIT_KEEP_ALIVE_SECONDS:-60}"
       CITYPASS_UPLOAD_DIR: /app/data/images
       TZ: Asia/Shanghai
       JAVA_TOOL_OPTIONS: -Duser.timezone=Asia/Shanghai
@@ -141,3 +165,4 @@ volumes:
   redis-data:
   rocketmq-store:
   app-images:
+  elasticsearch-data:

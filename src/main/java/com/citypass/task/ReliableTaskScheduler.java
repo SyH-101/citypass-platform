@@ -8,6 +8,7 @@ import com.citypass.reliable.ReliableTaskMetrics;
 import com.citypass.reliable.ReliableTaskRepository;
 import com.citypass.reliable.ReservationClaimTransfer;
 import com.citypass.reliable.VenueCacheInvalidation;
+import com.citypass.search.ActivitySearchIndexTaskHandler;
 import com.citypass.utils.VenueCacheInvalidator;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.rocketmq.client.producer.SendResult;
@@ -52,6 +53,7 @@ public class ReliableTaskScheduler {
     private final StringRedisTemplate redisTemplate;
     private final VenueCacheInvalidator venueCacheInvalidator;
     private final ReliableTaskMetrics metrics;
+    private final ActivitySearchIndexTaskHandler activitySearchIndexTaskHandler;
     private final String instanceId = UUID.randomUUID().toString();
 
     @Value("${reliable-task.batch-size:50}")
@@ -64,12 +66,14 @@ public class ReliableTaskScheduler {
                                  OrderMessagePublisher producer,
                                  StringRedisTemplate redisTemplate,
                                  VenueCacheInvalidator venueCacheInvalidator,
-                                 ReliableTaskMetrics metrics) {
+                                 ReliableTaskMetrics metrics,
+                                 ActivitySearchIndexTaskHandler activitySearchIndexTaskHandler) {
         this.repository = repository;
         this.producer = producer;
         this.redisTemplate = redisTemplate;
         this.venueCacheInvalidator = venueCacheInvalidator;
         this.metrics = metrics;
+        this.activitySearchIndexTaskHandler = activitySearchIndexTaskHandler;
     }
 
     @Scheduled(fixedDelayString = "${reliable-task.fixed-delay-ms:1000}")
@@ -77,7 +81,8 @@ public class ReliableTaskScheduler {
         try {
             // 每次只领取即将执行的一条，避免同批后部任务排队时租约先过期。
             for (int i = 0; i < batchSize; i++) {
-                List<ReliableTask> tasks = repository.claimReady(1, instanceId, leaseSeconds);
+                List<ReliableTask> tasks = repository.claimReady(
+                        1, instanceId, leaseSeconds, activitySearchIndexTaskHandler.isEnabled());
                 if (tasks.isEmpty()) break;
                 execute(tasks.get(0));
             }
@@ -136,6 +141,8 @@ public class ReliableTaskScheduler {
             } else if (ReliableTaskRepository.INVALIDATE_VENUE_CACHE.equals(task.getTaskType())) {
                 VenueCacheInvalidation invalidation = JSONUtil.toBean(task.getPayload(), VenueCacheInvalidation.class);
                 venueCacheInvalidator.evict(invalidation.getVenueId(), invalidation.getCacheVersion());
+            } else if (ReliableTaskRepository.INDEX_ACTIVITY_SEARCH.equals(task.getTaskType())) {
+                activitySearchIndexTaskHandler.execute(task.getPayload());
             } else {
                 throw new IllegalArgumentException("未知可靠任务类型: " + task.getTaskType());
             }

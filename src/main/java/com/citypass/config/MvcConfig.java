@@ -27,7 +27,9 @@ public class MvcConfig implements WebMvcConfigurer {
                         "/user/code",
                         "/user/login",
                         "/actuator/**",
-                        "/internal/reliable-tasks/**"
+                        "/internal/reliable-tasks/**",
+                        "/internal/activity-search/**",
+                        "/search/**"
                 ).order(1);
         registry.addInterceptor(slidingWindowInterceptor)
                 .addPathPatterns("/reservations/*")

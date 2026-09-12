@@ -19,6 +19,7 @@ public class ReliableTaskRepository {
     public static final String INIT_RESERVATION_STOCK = "INIT_RESERVATION_STOCK";
     public static final String TRANSFER_RESERVATION_CLAIM = "TRANSFER_RESERVATION_CLAIM";
     public static final String INVALIDATE_VENUE_CACHE = "INVALIDATE_VENUE_CACHE";
+    public static final String INDEX_ACTIVITY_SEARCH = "INDEX_ACTIVITY_SEARCH";
 
     public enum FailureDisposition { RETRY, DEAD, LOST_LEASE }
 
@@ -49,10 +50,17 @@ public class ReliableTaskRepository {
      */
     @Transactional(rollbackFor = Exception.class)
     public List<ReliableTask> claimReady(int limit, String owner, int leaseSeconds) {
+        return claimReady(limit, owner, leaseSeconds, true);
+    }
+
+    /** Search tasks remain pending while the optional module is disabled. */
+    @Transactional(rollbackFor = Exception.class)
+    public List<ReliableTask> claimReady(int limit, String owner, int leaseSeconds, boolean includeSearchTasks) {
+        String searchFilter = includeSearchTasks ? "" : " AND task_type<>'" + INDEX_ACTIVITY_SEARCH + "'";
         List<ReliableTask> candidates = jdbcTemplate.query(
                 "SELECT id,task_type,payload,retry_count,max_retry,version FROM tb_reliable_task " +
-                        "WHERE (status='PENDING' AND next_retry_time<=NOW()) " +
-                        "OR (status='RUNNING' AND lease_until<=NOW()) " +
+                        "WHERE ((status='PENDING' AND next_retry_time<=NOW()) " +
+                        "OR (status='RUNNING' AND lease_until<=NOW())) " + searchFilter +
                         "ORDER BY id LIMIT ? FOR UPDATE SKIP LOCKED",
                 new Object[]{limit},
                 (rs, rowNum) -> {
@@ -121,6 +129,21 @@ public class ReliableTaskRepository {
     public long countByStatus(String status) {
         Long count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM tb_reliable_task WHERE status=?", Long.class, status);
+        return count == null ? 0L : count;
+    }
+
+    public long countByStatusAndType(String status, String type) {
+        Long count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM tb_reliable_task WHERE status=? AND task_type=?",
+                new Object[]{status, type}, Long.class);
+        return count == null ? 0L : count;
+    }
+
+    public long countReadyByType(String type) {
+        Long count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM tb_reliable_task WHERE task_type=? AND " +
+                        "((status='PENDING' AND next_retry_time<=NOW()) OR (status='RUNNING' AND lease_until<=NOW()))",
+                new Object[]{type}, Long.class);
         return count == null ? 0L : count;
     }
 

@@ -13,6 +13,8 @@ import com.citypass.reliable.ReliableTaskRepository;
 import com.citypass.reliable.VenueCacheInvalidation;
 import cn.hutool.json.JSONUtil;
 import com.citypass.utils.SystemConstants;
+import com.citypass.search.ActivitySearchOutboxService;
+import com.citypass.search.SearchRebuildStateRepository;
 import org.springframework.data.geo.Distance;
 import org.springframework.data.geo.GeoResult;
 import org.springframework.data.geo.GeoResults;
@@ -50,6 +52,10 @@ public class VenueServiceImpl extends ServiceImpl<VenueMapper, Venue> implements
 
     @Resource
     private ReliableTaskRepository reliableTaskRepository;
+    @Resource
+    private ActivitySearchOutboxService activitySearchOutboxService;
+    @Resource
+    private SearchRebuildStateRepository searchRebuildStateRepository;
 
     @Override
     public Result queryById(Long id) {
@@ -83,6 +89,7 @@ public class VenueServiceImpl extends ServiceImpl<VenueMapper, Venue> implements
         if (id == null) {
             return Result.fail("场馆id不能为空");
         }
+        searchRebuildStateRepository.assertWritesAllowed();
         // 1.更新数据库
         boolean updated = updateById(venue);
         if (!updated) {
@@ -96,6 +103,8 @@ public class VenueServiceImpl extends ServiceImpl<VenueMapper, Venue> implements
                 ReliableTaskRepository.INVALIDATE_VENUE_CACHE,
                 "invalidate-venue-cache:" + id + ":" + refreshed.getCacheVersion(),
                 JSONUtil.toJsonStr(new VenueCacheInvalidation(id, refreshed.getCacheVersion())));
+        // Venue name/address/area/coordinates are denormalized into all related activity documents.
+        activitySearchOutboxService.bumpVenueDocumentsAndEnqueue(id);
         return Result.ok();
     }
 
