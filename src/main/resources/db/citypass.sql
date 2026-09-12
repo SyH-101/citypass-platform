@@ -211,13 +211,24 @@ CREATE TABLE `tb_activity_pass`  (
   `title` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '通行证标题',
   `sub_title` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL COMMENT '副标题',
   `rules` varchar(1024) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL COMMENT '使用规则',
+  `description` varchar(2000) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL COMMENT '活动介绍',
+  `activity_category` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL COMMENT '活动分类，不同于票券 type',
+  `tags` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL COMMENT '逗号分隔标签',
+  `event_start_time` datetime NULL DEFAULT NULL COMMENT '活动实际举办开始时间',
+  `event_end_time` datetime NULL DEFAULT NULL COMMENT '活动实际举办结束时间',
   `pay_value` bigint(10) UNSIGNED NOT NULL COMMENT '支付金额，单位是分。例如200代表2元',
   `actual_value` bigint(10) NOT NULL COMMENT '抵扣金额，单位是分。例如200代表2元',
   `type` tinyint(1) UNSIGNED NOT NULL DEFAULT 0 COMMENT '0,普通券；1,限量预约券',
   `status` tinyint(1) UNSIGNED NOT NULL DEFAULT 1 COMMENT '1,上架; 2,下架; 3,过期',
+  `search_version` bigint(20) UNSIGNED NOT NULL DEFAULT 1 COMMENT '搜索文档单调版本',
   `create_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  PRIMARY KEY (`id`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE,
+  INDEX `idx_activity_venue_search` (`venue_id`,`id`),
+  CONSTRAINT `chk_activity_event_time` CHECK (
+    (`event_start_time` IS NULL AND `event_end_time` IS NULL)
+    OR (`event_start_time` IS NOT NULL AND `event_end_time` IS NOT NULL AND `event_end_time` > `event_start_time`)
+  )
 ) ENGINE = InnoDB AUTO_INCREMENT = 10 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci ROW_FORMAT = Compact;
 
 -- ----------------------------
@@ -322,5 +333,23 @@ CREATE TABLE `tb_reliable_task` (
   UNIQUE KEY `uk_reliable_task_biz_key` (`biz_key`),
   KEY `idx_reliable_task_scan` (`status`,`next_retry_time`,`lease_until`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='本地可靠任务/事务发件箱';
+
+-- Full-index rebuild uses a controlled maintenance window for activity/venue search writes.
+DROP TABLE IF EXISTS `tb_search_rebuild_state`;
+CREATE TABLE `tb_search_rebuild_state` (
+  `id` tinyint(1) UNSIGNED NOT NULL,
+  `status` varchar(16) NOT NULL DEFAULT 'IDLE' COMMENT 'IDLE/RUNNING/SUCCEEDED/FAILED',
+  `write_blocked` tinyint(1) NOT NULL DEFAULT 0,
+  `target_index` varchar(128) DEFAULT NULL,
+  `previous_index` varchar(128) DEFAULT NULL,
+  `source_count` bigint(20) NOT NULL DEFAULT 0,
+  `indexed_count` bigint(20) NOT NULL DEFAULT 0,
+  `last_error` varchar(500) DEFAULT NULL,
+  `started_at` datetime DEFAULT NULL,
+  `finished_at` datetime DEFAULT NULL,
+  `update_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='活动搜索全量重建状态';
+INSERT INTO `tb_search_rebuild_state` (`id`) VALUES (1);
 
 SET FOREIGN_KEY_CHECKS = 1;

@@ -13,6 +13,7 @@ CityPass 是一个城市活动发现与限量名额预约平台。它面向展�
 - 预约候补：MySQL 严格 FIFO 队列、活动级串行点、异常候补跳过、名额版本化交接。
 - 可靠性：预约请求事实 + Transactional Outbox、支付/到期复合 CAS、任务级租约与版本栅栏、死信与手工重放、Micrometer 指标。
 - 缓存一致性：与场馆写入同事务保存失效 Outbox，Redis 版本水位阻止旧读回写，Pub/Sub 广播驱逐所有 JVM 的 Caffeine。
+- 活动搜索：Elasticsearch 中文全文检索与结构化过滤，PIT + `search_after` 游标分页，单调索引版本、场馆字段扇出和维护窗口全量重建。
 
 ## 系统结构
 
@@ -26,6 +27,7 @@ flowchart LR
     App --> MQ[RocketMQ]
     MQ --> App
     App --> DB[(MySQL)]
+    App --> ES[(可选 Elasticsearch)]
     DB -. 可选 binlog .-> Canal[Canal]
     Canal --> MQ
 ```
@@ -93,6 +95,7 @@ docker compose ps
 deploy/mysql/migration-v2.sql
 deploy/mysql/migration-v3-waitlist.sql
 deploy/mysql/migration-v4-reliability.sql
+deploy/mysql/migration-v5-activity-search.sql
 ```
 
 可选的 Canal 缓存驱逐链路：
@@ -101,6 +104,21 @@ deploy/mysql/migration-v4-reliability.sql
 $env:CANAL_ENABLED='true'
 docker compose --profile canal up -d --build
 ```
+
+可选的活动全文检索模块使用 Elasticsearch 7.17.29，并在镜像中真实安装 SmartCN：
+
+```powershell
+$env:SEARCH_ENABLED='true'
+$env:SEARCH_CURSOR_SECRET='替换为至少16字符的随机密钥'
+$env:RELIABLE_TASK_ADMIN_TOKEN='替换为运维令牌'
+docker compose --profile search up -d --build
+
+Invoke-RestMethod -Method Post `
+  -Uri http://localhost:8081/internal/activity-search/rebuild `
+  -Headers @{'X-Admin-Token'=$env:RELIABLE_TASK_ADMIN_TOKEN}
+```
+
+搜索关闭时不会创建 Elasticsearch 客户端，预约与场馆业务仍可运行；期间产生的 `INDEX_ACTIVITY_SEARCH` 任务保持 `PENDING`，重新启用并完成首次重建后继续收敛。
 
 ## 验证
 
@@ -116,9 +134,10 @@ Docker 全链路测试：
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke-test.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\reliability-test.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\cache-consistency-test.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\activity-search-test.ps1
 ```
 
-`smoke-test.ps1` 覆盖主要业务功能。`reliability-test.ps1` 使用真实 MySQL、Redis 和 RocketMQ 验证 100 用户并发争抢 10 份库存、双释放补位、锁住队首时不跳号、Broker 故障恢复、支付/超时边界和 Lua 重试幂等。`cache-consistency-test.ps1` 额外启动第二个应用实例，验证广播失效与旧版本回写拒绝。
+`smoke-test.ps1` 覆盖主要业务功能。`reliability-test.ps1` 使用真实 MySQL、Redis 和 RocketMQ 验证 100 用户并发争抢 10 份库存、双释放补位、锁住队首时不跳号、Broker 故障恢复、支付/超时边界和 Lua 重试幂等。`cache-consistency-test.ps1` 额外启动第二个应用实例，验证广播失效与旧版本回写拒绝。`activity-search-test.ps1` 使用 6 个可复现活动样例验证中文分词、排序与组合过滤、稳定游标、下架与乱序保护、场馆扇出、重建以及 ES 故障恢复；它是小样本功能验收，不是生产性能压测。
 
 ## 主要 API
 
@@ -126,7 +145,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\cache-consistency-
 |---|---|---|
 | GET | `/venues/{id}` | 场馆详情 |
 | GET | `/venues/of/type` | 分类与距离查询 |
+| GET | `/search/activities` | 活动全文检索、结构化过滤与游标分页 |
 | POST | `/passes/limited` | 发布限量活动通行证 |
+| PUT | `/passes/{id}/search-metadata` | 修改活动搜索元数据 |
+| PUT | `/passes/{id}/status` | 活动上架或下架 |
 | POST | `/reservations/{passId}` | 预约，可选择接受候补 |
 | GET | `/reservations/requests/{requestId}` | 查询预约或候补状态 |
 | PUT | `/reservations/{orderId}/pay` | 支付预约订单 |
@@ -137,7 +159,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\cache-consistency-
 
 ## 学习顺序
 
-先读 [00-先读这里](docs/00-先读这里.md)，再按 [01-项目全景与代码地图](docs/01-项目全景与代码地图.md) 定位代码。预约与候补的核心推理在 [02-预约一致性与候补补位](docs/02-预约一致性与候补补位.md)，缓存与安全在 [03-缓存限流与安全](docs/03-缓存限流与安全.md)，面试表达和简历边界分别在 [04-面试讲法与追问](docs/04-面试讲法与追问.md) 与 [07-简历项目写法](docs/07-简历项目写法.md)。五项可靠性升级的最终代码与能力边界见 [08-v4 可靠性升级](docs/08-v4可靠性升级.md)。
+先读 [00-先读这里](docs/00-先读这里.md)，再按 [01-项目全景与代码地图](docs/01-项目全景与代码地图.md) 定位代码。预约与候补的核心推理在 [02-预约一致性与候补补位](docs/02-预约一致性与候补补位.md)，缓存与安全在 [03-缓存限流与安全](docs/03-缓存限流与安全.md)，面试表达和简历边界分别在 [04-面试讲法与追问](docs/04-面试讲法与追问.md) 与 [07-简历项目写法](docs/07-简历项目写法.md)。五项可靠性升级的最终代码与能力边界见 [08-v4 可靠性升级](docs/08-v4可靠性升级.md)，全文检索的字段、分页、版本与重建见 [09-活动全文检索与索引治理](docs/09-活动全文检索与索引治理.md)。
 
 ## 工程演进说明
 

@@ -52,6 +52,23 @@ public class ActivityPass implements Serializable {
      */
     private String rules;
 
+    /** 可检索的活动介绍，不复用票券使用规则。 */
+    private String description;
+
+    /** 活动分类，如 EXHIBITION / SPORT / FAMILY；不复用普通/限量票券 type。 */
+    private String activityCategory;
+
+    /** 逗号分隔的检索标签。 */
+    private String tags;
+
+    /** 活动实际举办时间，与限量预约开放窗口 beginTime/endTime 分离。 */
+    private LocalDateTime eventStartTime;
+
+    private LocalDateTime eventEndTime;
+
+    /** 搜索文档专用单调版本，不与缓存、名额或任务租约版本混用。 */
+    private Long searchVersion;
+
     /**
      * 支付金额
      */

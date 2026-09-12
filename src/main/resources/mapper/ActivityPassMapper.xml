@@ -4,8 +4,10 @@
 
     <select id="queryActivityPassOfVenue" resultType="com.citypass.entity.ActivityPass" parameterType="java.lang.Long">
         SELECT
-            v.`id`, v.`venue_id`, v.`title`, v.`sub_title`, v.`rules`, v.`pay_value`,
-            v.`actual_value`, v.`type`, sv.`stock` , sv.begin_time , sv.end_time
+            v.`id`, v.`venue_id`, v.`title`, v.`sub_title`, v.`rules`, v.`description`,
+            v.`activity_category`, v.`tags`, v.`event_start_time`, v.`event_end_time`,
+            v.`pay_value`, v.`actual_value`, v.`type`, v.`status`, v.`search_version`,
+            sv.`stock` , sv.begin_time , sv.end_time
         FROM tb_activity_pass v
         LEFT JOIN  tb_limited_pass_stock sv ON v.id = sv.activity_pass_id
         WHERE v.venue_id = #{venueId} AND v.status = 1
