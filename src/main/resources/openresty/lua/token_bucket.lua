@@ -1,4 +1,4 @@
--- 网关令牌桶（懒补充）：全局共一桶，限制进入 Java 的总 QPS（挡洪峰）
+-- 网关令牌桶（懒补充）：key_prefix 决定全局桶或按来源隔离的桶
 -- 多 worker 下用 shared.dict 短锁保证读写原子
 local _M = {}
 
@@ -24,7 +24,7 @@ end
 
 ---
 -- dict: ngx.shared dict
--- key_prefix: 如 "reservation"
+-- key_prefix: 如 "reservation" 或 "venue-read:127.0.0.1"
 -- rate: 每秒补充令牌数（全局）
 -- capacity: 桶容量（全局突发）
 -- @return true 放行 / false 限流

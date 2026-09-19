@@ -35,7 +35,7 @@ if ($existingSecondary) { & docker rm -f $secondary | Out-Null }
     -e 'MYSQL_URL=jdbc:mysql://mysql:3306/citypass?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=utf8' `
     -e MYSQL_USERNAME=root -e MYSQL_PASSWORD=123456 -e REDIS_HOST=redis `
     -e ROCKETMQ_ENABLED=true -e ROCKETMQ_NAME_SERVER=namesrv:9876 `
-    -e GATEWAY_CACHE_PURGE_URL=http://openresty/internal/cache/venue `
+    -e GATEWAY_CACHE_PURGE_URLS=http://openresty/internal/cache/venue `
     -e JAVA_TOOL_OPTIONS=-Duser.timezone=Asia/Shanghai -e TZ=Asia/Shanghai "${Project}-app" | Out-Null
 
 try {

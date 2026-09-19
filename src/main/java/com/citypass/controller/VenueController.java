@@ -10,6 +10,7 @@ import com.citypass.utils.SystemConstants;
 import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
+import javax.servlet.http.HttpServletResponse;
 
 /**
  * <p>
@@ -30,8 +31,16 @@ public class VenueController {
      * @return 场馆详情数据
      */
     @GetMapping("/{id}")
-    public Result queryVenueById(@PathVariable("id") Long id) {
-        return venueService.queryById(id);
+    public Result queryVenueById(@PathVariable("id") Long id, HttpServletResponse response) {
+        Result result = venueService.queryById(id);
+        if (Boolean.TRUE.equals(result.getSuccess()) && result.getData() instanceof Venue) {
+            Long cacheVersion = ((Venue) result.getData()).getCacheVersion();
+            if (cacheVersion != null && cacheVersion >= 0) {
+                response.setHeader("X-Venue-Cache-Version", String.valueOf(cacheVersion));
+                response.setHeader("X-Gateway-Cacheable", "1");
+            }
+        }
+        return result;
     }
 
     /**

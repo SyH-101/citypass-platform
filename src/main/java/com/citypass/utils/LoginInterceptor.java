@@ -28,7 +28,10 @@ public class LoginInterceptor implements HandlerInterceptor {
             return false;
         }
         String uri = request.getRequestURI();
-        return uri.startsWith("/venues/")
+        return uri.matches("/venues/\\d+")
+                || uri.equals("/venues/of/type")
+                || uri.equals("/venues/of/name")
+                || uri.matches("/venues/benchmark/(redis|db)/\\d+")
                 || uri.startsWith("/passes/")
                 || uri.startsWith("/venue-categories/")
                 || uri.matches("/stories/\\d+")

@@ -26,4 +26,17 @@ class LoginInterceptorTest {
         assertFalse(interceptor.preHandle(put, response, new Object()));
         assertEquals(401, response.getStatus());
     }
+
+    @Test
+    void publicVenuePolicyMatchesOnlyDeclaredReadRoutes() throws Exception {
+        assertTrue(interceptor.preHandle(
+                new MockHttpServletRequest("GET", "/venues/of/type"),
+                new MockHttpServletResponse(), new Object()));
+
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        assertFalse(interceptor.preHandle(
+                new MockHttpServletRequest("GET", "/venues/private-probe"),
+                response, new Object()));
+        assertEquals(401, response.getStatus());
+    }
 }

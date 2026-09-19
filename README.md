@@ -6,13 +6,13 @@ CityPass 是一个城市活动发现与限量名额预约平台。它面向展�
 
 ## 核心能力
 
-- 城市场馆：分类、关键词、坐标距离查询，OpenResty + Caffeine + Redis + MySQL 多级读取。
+- 城市场馆：分类、关键词、坐标距离查询，OpenResty + Caffeine + Redis + MySQL 多级读取；详情读具备 IP 防刷、watchdog 热点重建和有界 DB 降级。
 - 城市动态：发布、热榜、点赞排行、滚动 Feed、创作者订阅、评论与作者信息聚合。
 - 用户体系：短信验证码登录、一次性验证码、Redis Token、滑动续期、签到位图。
 - 限量预约：OpenResty 总量令牌桶、用户滑动窗口、RocketMQ 削峰、Redis Lua 原子占位、MySQL 条件扣减。
 - 预约候补：MySQL 严格 FIFO 队列、活动级串行点、异常候补跳过、名额版本化交接。
 - 可靠性：预约请求事实 + Transactional Outbox、支付/到期复合 CAS、任务级租约与版本栅栏、死信与手工重放、Micrometer 指标。
-- 缓存一致性：与场馆写入同事务保存失效 Outbox，Redis 版本水位阻止旧读回写，Pub/Sub 广播驱逐所有 JVM 的 Caffeine。
+- 缓存一致性：与场馆写入同事务保存失效 Outbox，Redis 版本水位阻止旧读回写，Pub/Sub 广播驱逐所有 JVM 的 Caffeine；Redis 故障由 failure gate 与每 JVM bulkhead 限制回源。
 - 活动搜索：Elasticsearch 中文全文检索与结构化过滤，PIT + `search_after` 游标分页，单调索引版本、场馆字段扇出和维护窗口全量重建。
 
 ## 系统结构
@@ -105,6 +105,22 @@ $env:CANAL_ENABLED='true'
 docker compose --profile canal up -d --build
 ```
 
+多个独立 OpenResty shared dict 需要显式配置全部 purge 地址，逗号分隔；旧的 `GATEWAY_CACHE_PURGE_URL` 单地址变量仍兼容：
+
+```powershell
+$env:GATEWAY_CACHE_PURGE_URLS='http://gateway-a/internal/cache/venue,http://gateway-b/internal/cache/venue'
+```
+
+Venue 详情网关读限流与 Java 降级容量均可配置。读限流使用独立的按 IP 令牌桶；`CACHE_DB_FALLBACK_MAX_CONCURRENCY` 是每个应用实例的上限：
+
+```powershell
+$env:VENUE_READ_RATE_PER_SECOND='60'
+$env:VENUE_READ_BURST='120'
+$env:CACHE_REDIS_FAILURE_THRESHOLD='3'
+$env:CACHE_REDIS_OPEN_DURATION_MS='3000'
+$env:CACHE_DB_FALLBACK_MAX_CONCURRENCY='8'
+```
+
 可选的活动全文检索模块使用 Elasticsearch 7.17.29，并在镜像中真实安装 SmartCN：
 
 ```powershell
@@ -134,10 +150,11 @@ Docker 全链路测试：
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke-test.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\reliability-test.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\cache-consistency-test.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\gateway-cache-consistency-test.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\activity-search-test.ps1
 ```
 
-`smoke-test.ps1` 覆盖主要业务功能。`reliability-test.ps1` 使用真实 MySQL、Redis 和 RocketMQ 验证 100 用户并发争抢 10 份库存、双释放补位、锁住队首时不跳号、Broker 故障恢复、支付/超时边界和 Lua 重试幂等。`cache-consistency-test.ps1` 额外启动第二个应用实例，验证广播失效与旧版本回写拒绝。`activity-search-test.ps1` 使用 6 个可复现活动样例验证中文分词、排序与组合过滤、稳定游标、下架与乱序保护、场馆扇出、重建以及 ES 故障恢复；它是小样本功能验收，不是生产性能压测。
+`smoke-test.ps1` 覆盖主要业务功能。`reliability-test.ps1` 使用真实 MySQL、Redis 和 RocketMQ 验证 100 用户并发争抢 10 份库存、双释放补位、锁住队首时不跳号、Broker 故障恢复、支付/超时边界和 Lua 重试幂等。`cache-consistency-test.ps1` 额外启动第二个应用实例，验证广播失效与旧版本回写拒绝；`gateway-cache-consistency-test.ps1` 验证 OpenResty 的版本化 MISS/HIT、乱序 purge、旧响应拒写、随机不存在 ID 的 429 保护及直连/网关权限一致性。`MultiLevelCacheServiceTest` 覆盖 null marker、200 并发热点、超过 10 秒的重建、bulkhead、Redis 故障恢复和逻辑过期。`activity-search-test.ps1` 使用 6 个可复现活动样例验证中文分词、排序与组合过滤、稳定游标、下架与乱序保护、场馆扇出、重建以及 ES 故障恢复；它是小样本功能验收，不是生产性能压测。
 
 ## 主要 API
 

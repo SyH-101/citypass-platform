@@ -19,6 +19,8 @@ public class RedisConstants {
 
     public static final String LOCK_VENUE_KEY = "lock:venue:";
     public static final Long LOCK_VENUE_TTL = 10L;
+    /** Redisson hash lock namespace; separate from the legacy string lock used by benchmarks. */
+    public static final String LOCK_VENUE_REBUILD_KEY = "lock:venue:rebuild:";
 
     public static final String RESERVATION_STOCK_KEY = "reservation:stock:";
     /** 限量预约成功 claim 用户集合（Lua 脚本 SADD 写入，一人一单与补单差集依据） */

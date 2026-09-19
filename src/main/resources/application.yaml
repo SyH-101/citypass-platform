@@ -17,6 +17,7 @@ spring:
     host: ${REDIS_HOST:127.0.0.1}
     port: ${REDIS_PORT:6379}
     password: ${REDIS_PASSWORD:}
+    timeout: ${REDIS_COMMAND_TIMEOUT:1s}
     lettuce:
       pool:
         max-active: 10
@@ -38,8 +39,21 @@ rocketmq:
 canal:
   enabled: ${CANAL_ENABLED:false}
 gateway-cache:
-  # 例如 http://127.0.0.1/internal/cache/venue；留空时只驱逐 Caffeine + Redis
+  # 多个地址用逗号分隔；每个网关都确认成功后可靠任务才完成。
+  purge-urls: ${GATEWAY_CACHE_PURGE_URLS:}
+  # 兼容旧的单地址配置；与 purge-urls 合并去重。
   purge-url: ${GATEWAY_CACHE_PURGE_URL:}
+cache:
+  reliability:
+    # Redis 连续异常达到阈值后短暂 OPEN，冷却后只允许一个 HALF_OPEN 探测。
+    redis-failure-threshold: ${CACHE_REDIS_FAILURE_THRESHOLD:3}
+    redis-open-duration-ms: ${CACHE_REDIS_OPEN_DURATION_MS:3000}
+    redis-command-timeout-ms: ${CACHE_REDIS_COMMAND_TIMEOUT_MS:1000}
+    # 每个 JVM 的降级 DB 并发上限；tryAcquire 失败直接返回 503，不排队。
+    db-fallback-max-concurrency: ${CACHE_DB_FALLBACK_MAX_CONCURRENCY:8}
+    lock-wait-attempts: ${CACHE_LOCK_WAIT_ATTEMPTS:20}
+    lock-wait-min-delay-ms: ${CACHE_LOCK_WAIT_MIN_DELAY_MS:25}
+    lock-wait-max-delay-ms: ${CACHE_LOCK_WAIT_MAX_DELAY_MS:50}
 reliable-task:
   enabled: ${RELIABLE_TASK_ENABLED:true}
   fixed-delay-ms: 1000

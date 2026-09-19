@@ -19,14 +19,19 @@ public class RedissonConfig {
     @Value("${spring.redis.password:}")
     private String redisPassword;
 
+    @Value("${cache.reliability.redis-command-timeout-ms:1000}")
+    private int redisCommandTimeoutMs;
+
     @Bean
     public RedissonClient redissonClient() {
         Config config = new Config();
         String address = "redis://" + redisHost + ":" + redisPort;
+        org.redisson.config.SingleServerConfig server = config.useSingleServer()
+                .setAddress(address)
+                .setConnectTimeout(Math.max(100, redisCommandTimeoutMs))
+                .setTimeout(Math.max(100, redisCommandTimeoutMs));
         if (redisPassword != null && !redisPassword.isEmpty()) {
-            config.useSingleServer().setAddress(address).setPassword(redisPassword);
-        } else {
-            config.useSingleServer().setAddress(address);
+            server.setPassword(redisPassword);
         }
         return Redisson.create(config);
     }
