@@ -4,7 +4,8 @@ import com.citypass.mq.OrderMessagePublisher;
 import com.citypass.reliable.ReliableTask;
 import com.citypass.reliable.ReliableTaskMetrics;
 import com.citypass.reliable.ReliableTaskRepository;
-import com.citypass.search.ActivitySearchIndexTaskHandler;
+import com.citypass.story.StoryFeedHandler;
+import com.citypass.story.StoryFileCleanup;
 import com.citypass.utils.VenueCacheInvalidator;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -31,7 +32,7 @@ class ReliableTaskSchedulerGatewayTest {
                 mock(StringRedisTemplate.class),
                 invalidator,
                 metrics,
-                mock(ActivitySearchIndexTaskHandler.class));
+                mock(StoryFeedHandler.class), mock(StoryFileCleanup.class));
 
         ReliableTask task = new ReliableTask();
         task.setId(99L);

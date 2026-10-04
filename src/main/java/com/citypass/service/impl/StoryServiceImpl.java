@@ -16,6 +16,11 @@ import com.citypass.service.ISubscriptionService;
 import com.citypass.service.IUserService;
 import com.citypass.utils.SystemConstants;
 import com.citypass.utils.UserHolder;
+import com.citypass.story.StoryFileService;
+import com.citypass.story.StoryDraftService;
+import com.citypass.story.StoryProblem;
+import java.util.Map;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Service;
@@ -47,20 +52,25 @@ public class StoryServiceImpl extends ServiceImpl<StoryMapper, Story> implements
     private StringRedisTemplate stringRedisTemplate;
 
     @Resource
-    private ISubscriptionService subscriptionService;
+    private StoryFileService storyFileService;
+    @Resource
+    private JdbcTemplate jdbcTemplate;
 
     @Override
     public Result queryHotStory(Integer current) {
         // 根据用户查询
         Page<Story> page = query()
+                .eq("status", "PUBLISHED")
                 .orderByDesc("liked")
-                .page(new Page<>(current, SystemConstants.MAX_PAGE_SIZE));
+                .orderByDesc("id")
+                .page(new Page<>(Math.max(1,current), SystemConstants.MAX_PAGE_SIZE));
         // 获取当前页数据
         List<Story> records = page.getRecords();
         // 查询用户
         records.forEach(story -> {
             this.queryStoryUser(story);
             this.isStoryLiked(story);
+            this.decorateImages(story);
         });
         return Result.ok(records);
     }
@@ -72,10 +82,12 @@ public class StoryServiceImpl extends ServiceImpl<StoryMapper, Story> implements
         if (story == null) {
             return Result.fail("笔记不存在！");
         }
+        checkReadable(story);
         // 2.查询story有关的用户
         queryStoryUser(story);
         // 3.查询story是否被点赞
         isStoryLiked(story);
+        decorateImages(story);
         return Result.ok(story);
     }
 
@@ -95,6 +107,7 @@ public class StoryServiceImpl extends ServiceImpl<StoryMapper, Story> implements
 
     @Override
     public Result likeStory(Long id) {
+        requirePublished(id);
         // 1.获取登录用户
         Long userId = UserHolder.getUser().getId();
         // 2.判断当前登录用户是否已经点赞
@@ -103,7 +116,7 @@ public class StoryServiceImpl extends ServiceImpl<StoryMapper, Story> implements
         if (score == null) {
             // 3.如果未点赞，可以点赞
             // 3.1.数据库点赞数 + 1
-            boolean isSuccess = update().setSql("liked = liked + 1").eq("id", id).update();
+            boolean isSuccess = update().setSql("liked = liked + 1").eq("id", id).eq("status","PUBLISHED").update();
             // 3.2.保存用户到Redis的set集合  zadd key value score
             if (isSuccess) {
                 stringRedisTemplate.opsForZSet().add(key, userId.toString(), System.currentTimeMillis());
@@ -111,7 +124,7 @@ public class StoryServiceImpl extends ServiceImpl<StoryMapper, Story> implements
         } else {
             // 4.如果已点赞，取消点赞
             // 4.1.数据库点赞数 -1
-            boolean isSuccess = update().setSql("liked = liked - 1").eq("id", id).update();
+            boolean isSuccess = update().setSql("liked = GREATEST(liked - 1,0)").eq("id", id).eq("status","PUBLISHED").update();
             // 4.2.把用户从Redis的set集合移除
             if (isSuccess) {
                 stringRedisTemplate.opsForZSet().remove(key, userId.toString());
@@ -122,6 +135,7 @@ public class StoryServiceImpl extends ServiceImpl<StoryMapper, Story> implements
 
     @Override
     public Result queryStoryLikes(Long id) {
+        requirePublished(id);
         String key = STORY_LIKED_KEY + id;
         // 1.查询top5的点赞用户 zrange key 0 4
         Set<String> top5 = stringRedisTemplate.opsForZSet().range(key, 0, 4);
@@ -142,75 +156,63 @@ public class StoryServiceImpl extends ServiceImpl<StoryMapper, Story> implements
     }
 
     @Override
-    public Result saveStory(Story story) {
-        // 1.获取登录用户
-        UserDTO user = UserHolder.getUser();
-        story.setUserId(user.getId());
-        // 2.保存活动笔记
-        boolean isSuccess = save(story);
-        if(!isSuccess){
-            return Result.fail("新增笔记失败!");
-        }
-        // 查询订阅作者的用户，并把动态编号推送到各自的时间线。
-        List<Subscription> subscriptions = subscriptionService.query()
-                .eq("target_user_id", user.getId()).list();
-        for (Subscription subscription : subscriptions) {
-            Long userId = subscription.getUserId();
-            // 4.2.推送
-            String key = FEED_KEY + userId;
-            stringRedisTemplate.opsForZSet().add(key, story.getId().toString(), System.currentTimeMillis());
-        }
-        // 5.返回id
-        return Result.ok(story.getId());
+    public Result queryByAuthor(Long userId,Integer current,boolean own) {
+        if(userId==null) throw new StoryProblem(400,"作者编号不能为空");
+        if(own && (UserHolder.getUser()==null || !userId.equals(UserHolder.getUser().getId()))) throw StoryProblem.missing();
+        com.baomidou.mybatisplus.extension.conditions.query.QueryChainWrapper<Story> q=query().eq("user_id",userId);
+        if(own) q.ne("status","DELETED").and(w -> w.eq("status","PUBLISHED").or().gt("draft_expires_at",java.time.LocalDateTime.now()));
+        else q.eq("status","PUBLISHED");
+        List<Story> rows=q.orderByDesc("id").page(new Page<>(Math.max(1,current==null?1:current),SystemConstants.MAX_PAGE_SIZE)).getRecords();
+        for(Story story:rows) { queryStoryUser(story); isStoryLiked(story); decorateImages(story); }
+        return Result.ok(rows);
     }
 
     @Override
-    public Result queryStoriesOfSubscriptions(Long max, Integer offset) {
-        // 1.获取当前用户
-        Long userId = UserHolder.getUser().getId();
-        // 2.查询收件箱 ZREVRANGEBYSCORE key Max Min LIMIT offset count
-        String key = FEED_KEY + userId;
-        Set<ZSetOperations.TypedTuple<String>> typedTuples = stringRedisTemplate.opsForZSet()
-                .reverseRangeByScoreWithScores(key, 0, max, offset, 2);
-        // 3.非空判断
-        if (typedTuples == null || typedTuples.isEmpty()) {
-            return Result.ok();
-        }
-        // 4.解析数据：storyId、minTime（时间戳）、offset
-        List<Long> ids = new ArrayList<>(typedTuples.size());
-        long minTime = 0; // 2
-        int os = 1; // 2
-        for (ZSetOperations.TypedTuple<String> tuple : typedTuples) { // 5 4 4 2 2
-            // 4.1.获取id
-            ids.add(Long.valueOf(tuple.getValue()));
-            // 4.2.获取分数(时间戳）
-            long time = tuple.getScore().longValue();
-            if(time == minTime){
-                os++;
-            }else{
-                minTime = time;
-                os = 1;
+    public Result queryStoriesOfSubscriptions(Long max,Integer offset) {
+        if(max==null || max<0 || offset==null || offset<0) throw new StoryProblem(400,"信息流游标非法");
+        String key=FEED_KEY+UserHolder.getUser().getId();
+        List<Story> rows=new ArrayList<>();
+        long cursor=max;
+        int consumed=offset;
+        // Bound scanned pages. The returned cursor advances even over hidden/deleted rows.
+        for(int batch=0;batch<20 && rows.size()<2;batch++) {
+            Set<ZSetOperations.TypedTuple<String>> hits=stringRedisTemplate.opsForZSet()
+                    .reverseRangeByScoreWithScores(key,0,cursor,consumed,2-rows.size());
+            if(hits==null || hits.isEmpty()) break;
+            for(ZSetOperations.TypedTuple<String> hit:hits) {
+                long score=hit.getScore().longValue();
+                if(score==cursor) consumed++; else { cursor=score; consumed=1; }
+                Story story=getById(Long.valueOf(hit.getValue()));
+                if(story!=null && "PUBLISHED".equals(story.getStatus())) {
+                    queryStoryUser(story); isStoryLiked(story); decorateImages(story); rows.add(story);
+                }
             }
         }
+        ScrollResult result=new ScrollResult(); result.setList(rows); result.setMinTime(cursor); result.setOffset(consumed);
+        return Result.ok(result);
+    }
 
-        // 5.根据id查询story
-        String idStr = StrUtil.join(",", ids);
-        List<Story> storys = query().in("id", ids).last("ORDER BY FIELD(id," + idStr + ")").list();
-
-        for (Story story : storys) {
-            // 5.1.查询story有关的用户
-            queryStoryUser(story);
-            // 5.2.查询story是否被点赞
-            isStoryLiked(story);
+    private void requirePublished(Long id) {
+        Story story=getById(id);
+        if(story==null || !"PUBLISHED".equals(story.getStatus())) throw StoryProblem.missing();
+    }
+    private void checkReadable(Story story) {
+        Long current=UserHolder.getUser()==null?null:UserHolder.getUser().getId();
+        if("DELETED".equals(story.getStatus()) || (!"PUBLISHED".equals(story.getStatus()) && !story.getUserId().equals(current))) throw StoryProblem.missing();
+        if("DRAFT".equals(story.getStatus()) && !story.getDraftExpiresAt().isAfter(java.time.LocalDateTime.now())) throw StoryProblem.missing();
+    }
+    private void decorateImages(Story story) {
+        List<Map<String,Object>> attachments=new ArrayList<>();
+        List<String> urls=new ArrayList<>();
+        List<String> legacy=StoryDraftService.legacy(story.getImages());
+        for(int i=0;i<legacy.size();i++) urls.add("/stories/"+story.getId()+"/legacy-images/"+i);
+        for(Map<String,Object> row:jdbcTemplate.queryForList("SELECT a.* FROM tb_story_attachment_ref r JOIN tb_story_attachment a ON a.id=r.attachment_id WHERE r.story_id=? AND r.active=1 AND a.state='READY' ORDER BY r.position",story.getId())) {
+            Map<String,Object> info=StoryFileService.publicInfo(row);
+            String url=storyFileService.readUrl(story.getId(),((Number)row.get("id")).longValue(),UserHolder.getUser()==null?null:UserHolder.getUser().getId());
+            info.put("url",url); attachments.add(info); urls.add(url);
         }
-
-        // 6.封装并返回
-        ScrollResult r = new ScrollResult();
-        r.setList(storys);
-        r.setOffset(os);
-        r.setMinTime(minTime);
-
-        return Result.ok(r);
+        story.setAttachments(attachments).setImages(String.join(",",urls));
+        story.setClientKey(null);
     }
 
     private void queryStoryUser(Story story) {

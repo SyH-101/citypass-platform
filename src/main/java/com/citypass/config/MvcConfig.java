@@ -28,11 +28,21 @@ public class MvcConfig implements WebMvcConfigurer {
                         "/user/login",
                         "/actuator/**",
                         "/internal/reliable-tasks/**",
-                        "/internal/activity-search/**",
-                        "/search/**"
+                        "/debug/story-files",
+                        "/debug/story-files.js",
+                        "/debug/story-files.css",
+                        "/debug/story-files/**"
                 ).order(1);
         registry.addInterceptor(slidingWindowInterceptor)
                 .addPathPatterns("/reservations/*")
                 .order(2);
+        registry.addInterceptor(new org.springframework.web.servlet.HandlerInterceptor() {
+            @Override
+            public boolean preHandle(javax.servlet.http.HttpServletRequest request,
+                                     javax.servlet.http.HttpServletResponse response, Object handler) {
+                response.setHeader("Cache-Control", "private, no-store");
+                return true;
+            }
+        }).addPathPatterns("/stories/**").order(-1);
     }
 }

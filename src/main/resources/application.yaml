@@ -2,10 +2,30 @@ server:
   port: 8081
 citypass:
   upload-dir: ${CITYPASS_UPLOAD_DIR:./data/images}
+object-storage:
+  provider: ${OBJECT_STORAGE_PROVIDER:minio}
+  endpoint: ${OBJECT_STORAGE_ENDPOINT:http://127.0.0.1:9000}
+  public-endpoint: ${OBJECT_STORAGE_PUBLIC_ENDPOINT:http://localhost:9000}
+  region: ${OBJECT_STORAGE_REGION:us-east-1}
+  bucket: ${OBJECT_STORAGE_BUCKET:citypass-story-files}
+  access-key: ${OBJECT_STORAGE_ACCESS_KEY:}
+  secret-key: ${OBJECT_STORAGE_SECRET_KEY:}
+  timeout-seconds: ${OBJECT_STORAGE_TIMEOUT_SECONDS:10}
+story-files:
+  max-bytes: ${STORY_FILE_MAX_BYTES:10485760}
+  max-pixels: ${STORY_FILE_MAX_PIXELS:20000000}
+  max-dimension: ${STORY_FILE_MAX_DIMENSION:10000}
+  max-images: ${STORY_FILE_MAX_IMAGES:9}
+  pending-quota: ${STORY_FILE_PENDING_QUOTA:20}
+  upload-seconds: ${STORY_FILE_UPLOAD_SECONDS:300}
+  read-seconds: ${STORY_FILE_READ_SECONDS:120}
+  draft-hours: ${STORY_FILE_DRAFT_HOURS:24}
+  cleanup-grace-seconds: ${STORY_FILE_CLEANUP_GRACE_SECONDS:120}
+  confirmation-lease-seconds: ${STORY_FILE_CONFIRMATION_LEASE_SECONDS:60}
+  io-concurrency: ${STORY_FILE_IO_CONCURRENCY:4}
+  tombstone-rescan-seconds: ${STORY_FILE_TOMBSTONE_RESCAN_SECONDS:3600}
+  debug-page-enabled: ${STORY_DEBUG_PAGE_ENABLED:false}
 spring:
-  autoconfigure:
-    # 搜索模块自行按 search.enabled 创建客户端，避免关闭模块时 Boot 仍连接 localhost:9200。
-    exclude: org.springframework.boot.autoconfigure.elasticsearch.ElasticsearchRestClientAutoConfiguration
   application:
     name: citypass
   datasource:
@@ -61,19 +81,6 @@ reliable-task:
   lease-seconds: 30
   max-retry: 12
   admin-token: ${RELIABLE_TASK_ADMIN_TOKEN:}
-search:
-  enabled: ${SEARCH_ENABLED:false}
-  hosts: ${SEARCH_HOSTS:http://127.0.0.1:9200}
-  alias: ${SEARCH_ALIAS:citypass-activity-search}
-  cursor-secret: ${SEARCH_CURSOR_SECRET:}
-  connect-timeout-ms: ${SEARCH_CONNECT_TIMEOUT_MS:1000}
-  socket-timeout-ms: ${SEARCH_SOCKET_TIMEOUT_MS:3000}
-  request-timeout-ms: ${SEARCH_REQUEST_TIMEOUT_MS:3000}
-  pit-keep-alive-seconds: ${SEARCH_PIT_KEEP_ALIVE_SECONDS:60}
-  max-page-size: ${SEARCH_MAX_PAGE_SIZE:50}
-  max-radius-meters: ${SEARCH_MAX_RADIUS_METERS:50000}
-  max-supplement-batches: ${SEARCH_MAX_SUPPLEMENT_BATCHES:3}
-  rebuild-batch-size: ${SEARCH_REBUILD_BATCH_SIZE:200}
 reservation:
   offer-minutes: ${RESERVATION_OFFER_MINUTES:15}
   reconcile:

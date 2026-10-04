@@ -1,4 +1,10 @@
 HELP.md
+.env
+.env.*
+!.env.example
+data/
+deploy/minio/bin/
+*.log
 target/
 !.mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/

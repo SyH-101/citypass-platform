@@ -21,7 +21,7 @@ public interface IStoryService extends IService<Story> {
 
     Result queryStoryLikes(Long id);
 
-    Result saveStory(Story story);
+    Result queryByAuthor(Long userId, Integer current, boolean own);
 
     Result queryStoriesOfSubscriptions(Long max, Integer offset);
 

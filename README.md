@@ -2,18 +2,17 @@
 
 CityPass 是一个城市活动发现与限量名额预约平台。它面向展览、独立演出、运动场馆、研学营地和工作坊等场景，解决两个实际问题：热门活动瞬时请求会压垮数据库；用户取消或超时未支付后，空出的名额如果不能及时流转，会造成活动方的容量浪费。
 
-项目把“找场馆、看动态、订阅创作者”和“限量预约、候补、自动补位”放在同一业务背景下。重点不是接口数量，而是让库存、订单、候补和 Redis 占位在消息重复、服务重启、支付与关单并发时仍能收敛。
+项目把“找场馆、写活动笔记、订阅创作者”和“限量预约、候补、自动补位”放在同一业务背景下。三个重点分别是预约资源交接、多级缓存一致性，以及私有图片从上传到清理的完整生命周期。
 
 ## 核心能力
 
 - 城市场馆：分类、关键词、坐标距离查询，OpenResty + Caffeine + Redis + MySQL 多级读取；详情读具备 IP 防刷、watchdog 热点重建和有界 DB 降级。
-- 城市动态：发布、热榜、点赞排行、滚动 Feed、创作者订阅、评论与作者信息聚合。
+- 活动笔记：草稿、版本化编辑、发布与软删除；私有图片 staging 直传、封存校验、短期读取链接、可靠清理与迟到写入补扫；发布信息流由可靠任务分批推进。
 - 用户体系：短信验证码登录、一次性验证码、Redis Token、滑动续期、签到位图。
 - 限量预约：OpenResty 总量令牌桶、用户滑动窗口、RocketMQ 削峰、Redis Lua 原子占位、MySQL 条件扣减。
-- 预约候补：MySQL 严格 FIFO 队列、活动级串行点、异常候补跳过、名额版本化交接。
+- 预约候补：已入队候补按请求号选队首、活动级串行点、异常候补跳过、名额版本化交接。
 - 可靠性：预约请求事实 + Transactional Outbox、支付/到期复合 CAS、任务级租约与版本栅栏、死信与手工重放、Micrometer 指标。
-- 缓存一致性：与场馆写入同事务保存失效 Outbox，Redis 版本水位阻止旧读回写，Pub/Sub 广播驱逐所有 JVM 的 Caffeine；Redis 故障由 failure gate 与每 JVM bulkhead 限制回源。
-- 活动搜索：Elasticsearch 中文全文检索与结构化过滤，PIT + `search_after` 游标分页，单调索引版本、场馆字段扇出和维护窗口全量重建。
+- 缓存一致性：与场馆写入同事务保存失效 Outbox，Redis 版本水位阻止旧读回写，Pub/Sub 驱逐在线且连接正常的 JVM 的 Caffeine；Redis 故障由 failure gate 与每 JVM bulkhead 限制回源。
 
 ## 系统结构
 
@@ -27,7 +26,8 @@ flowchart LR
     App --> MQ[RocketMQ]
     MQ --> App
     App --> DB[(MySQL)]
-    App --> ES[(可选 Elasticsearch)]
+    Client -->|签名 PUT staging| Files[(私有 MinIO 或 OSS)]
+    App -->|封存 校验 签名 清理| Files
     DB -. 可选 binlog .-> Canal[Canal]
     Canal --> MQ
 ```
@@ -48,7 +48,7 @@ Redis 无库存且 acceptWaitlist=true
   -> WAITLISTED
 ```
 
-取消与超时关单使用不同的复合 CAS：超时路径必须同时命中 `status=1 AND offer_expire_time<=NOW()`。释放事务以活动库存行串行化，阻塞锁定真正队首，不会跳过被另一事务锁定的较早候补。Redis claim 以 `orderId:resourceVersion` 表示名额归属，只有期望版本匹配时才能交接或回补。
+取消与超时关单使用不同的复合 CAS：超时路径必须同时命中 `status=1 AND offer_expire_time<=采样时间`。释放事务以活动库存行串行化，阻塞锁定真正队首，不会跳过被另一事务锁定的较早候补。Redis claim 以 `orderId:resourceVersion` 表示名额归属，只有期望版本匹配时才能交接或回补。
 
 ## 关键状态
 
@@ -74,9 +74,16 @@ Redis 无库存且 acceptWaitlist=true
 
 ## 快速启动
 
-需要 Docker Desktop。仓库根目录执行：
+需要 Docker Desktop（Linux AMD64 容器）和 JDK 8。Spring Boot 保持 2.3.12，Maven Wrapper 使用 3.9.11。仓库根目录执行：
 
 ```powershell
+Copy-Item .env.example .env
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\prepare-minio.ps1
+.\mvnw.cmd clean test package
+# 官方 MinIO Release 固定版本 + SHA-256 校验；仅 minio 构建一次，init 复用镜像。
+docker compose build minio
+# 已有 jar 使用 Java 8 运行镜像；默认 Dockerfile 也可在容器内用 JDK 8 构建。
+$env:APP_DOCKERFILE='Dockerfile.runtime'
 docker compose up -d --build
 docker compose ps
 ```
@@ -88,15 +95,32 @@ docker compose ps
 - MySQL：`localhost:3307`
 - Redis：`localhost:6379`
 - RocketMQ NameServer：`localhost:9876`
+- MinIO S3：`http://localhost:9000`，控制台：`http://localhost:9001`
+- 笔记调试页：[http://localhost:8080/debug/story-files](http://localhost:8080/debug/story-files)
 
-全新环境会自动导入 `src/main/resources/db/citypass.sql`。旧增强版数据库依次执行：
+全新 MySQL 卷自动依次导入 `citypass.sql`、Canal 用户、`migration-v6-story-files.sql`。初始化 SQL 仅用于空环境，**旧数据库不能重导初始化 SQL**。数据库、Redis、MQ、历史本地图片与 MinIO 都使用持久卷；常规启动和验收不删除卷。
+
+旧增强版数据库补齐尚未执行的迁移，顺序如下；已应用过的 ALTER 不要重复执行：
 
 ```text
 deploy/mysql/migration-v2.sql
 deploy/mysql/migration-v3-waitlist.sql
 deploy/mysql/migration-v4-reliability.sql
 deploy/mysql/migration-v5-activity-search.sql
+deploy/mysql/migration-v6-story-files.sql
 ```
+
+v5 保留为历史迁移，活动分类、位置和时间仍用于业务；当前运行代码已经移除搜索模块。升级前停止所有旧应用实例，再执行 v6，最后启动新应用。v6 只将历史 `INDEX_ACTIVITY_SEARCH` 任务退役为 DONE，不处理预约/缓存任务，也不删除业务数据。已有 v5 数据库可用：
+
+```powershell
+docker compose stop app
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\apply-story-migration.ps1 -Project citypass
+docker compose up -d --build app openresty
+```
+
+首次安装无需手动执行该脚本。MySQL DDL 无法整体事务回滚，迁移失败应检查部分完成状态。旧笔记回填为 PUBLISHED；旧本地图片保留，通过受笔记可见性和路径边界约束的读取接口访问。
+
+MinIO 为默认真实开发存储，bucket 初始化为私有；浏览器 endpoint 必须与实际 host/端口一致，不能改写已签名 URL。CORS 来源在 `.env` 配置。云端切换 OSS 时设置 provider、endpoint、public endpoint、region、bucket 与环境凭证，并在 OSS 配置相同来源的 GET/PUT CORS；OSS V4 适配器已实现，云端联调状态见验收记录。公开部署应关闭 `STORY_DEBUG_PAGE_ENABLED`，设置独立凭证及可靠任务管理员令牌。
 
 可选的 Canal 缓存驱逐链路：
 
@@ -121,27 +145,12 @@ $env:CACHE_REDIS_OPEN_DURATION_MS='3000'
 $env:CACHE_DB_FALLBACK_MAX_CONCURRENCY='8'
 ```
 
-可选的活动全文检索模块使用 Elasticsearch 7.17.29，并在镜像中真实安装 SmartCN：
-
-```powershell
-$env:SEARCH_ENABLED='true'
-$env:SEARCH_CURSOR_SECRET='替换为至少16字符的随机密钥'
-$env:RELIABLE_TASK_ADMIN_TOKEN='替换为运维令牌'
-docker compose --profile search up -d --build
-
-Invoke-RestMethod -Method Post `
-  -Uri http://localhost:8081/internal/activity-search/rebuild `
-  -Headers @{'X-Admin-Token'=$env:RELIABLE_TASK_ADMIN_TOKEN}
-```
-
-搜索关闭时不会创建 Elasticsearch 客户端，预约与场馆业务仍可运行；期间产生的 `INDEX_ACTIVITY_SEARCH` 任务保持 `PENDING`，重新启用并完成首次重建后继续收敛。
-
 ## 验证
 
 单元测试：
 
 ```powershell
-mvn clean test
+.\mvnw.cmd clean test
 ```
 
 Docker 全链路测试：
@@ -151,10 +160,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke-test.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\reliability-test.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\cache-consistency-test.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\gateway-cache-consistency-test.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\activity-search-test.ps1
 ```
 
-`smoke-test.ps1` 覆盖主要业务功能。`reliability-test.ps1` 使用真实 MySQL、Redis 和 RocketMQ 验证 100 用户并发争抢 10 份库存、双释放补位、锁住队首时不跳号、Broker 故障恢复、支付/超时边界和 Lua 重试幂等。`cache-consistency-test.ps1` 额外启动第二个应用实例，验证广播失效与旧版本回写拒绝；`gateway-cache-consistency-test.ps1` 验证 OpenResty 的版本化 MISS/HIT、乱序 purge、旧响应拒写、随机不存在 ID 的 429 保护及直连/网关权限一致性。`MultiLevelCacheServiceTest` 覆盖 null marker、200 并发热点、超过 10 秒的重建、bulkhead、Redis 故障恢复和逻辑过期。`activity-search-test.ps1` 使用 6 个可复现活动样例验证中文分词、排序与组合过滤、稳定游标、下架与乱序保护、场馆扇出、重建以及 ES 故障恢复；它是小样本功能验收，不是生产性能压测。
+`smoke-test.ps1` 覆盖业务闭环；`reliability-test.ps1` 验证真实 100 用户争抢 10 个名额、FIFO 与 Broker 恢复；缓存脚本验证双 JVM、旧版本拒写及网关行为。`story-files-test.ps1` 断言权限、真实图片内容、staging 防覆盖、CAS 编辑、发布幂等、Feed 分页及清理状态。文件验收使用独立环境与短 TTL，具体命令、历史图片和迁移测试见 [笔记学习文档](03-活动笔记发布与文件管理.md) 和 [验收记录](docs/10-活动笔记与文件验收.md)。不要对共享环境执行停止存储/数据库触发器故障注入。
 
 ## 主要 API
 
@@ -162,9 +170,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\activity-search-te
 |---|---|---|
 | GET | `/venues/{id}` | 场馆详情 |
 | GET | `/venues/of/type` | 分类与距离查询 |
-| GET | `/search/activities` | 活动全文检索、结构化过滤与游标分页 |
 | POST | `/passes/limited` | 发布限量活动通行证 |
-| PUT | `/passes/{id}/search-metadata` | 修改活动搜索元数据 |
+| PUT | `/passes/{id}/metadata` | 修改活动分类、描述、时间等业务字段 |
 | PUT | `/passes/{id}/status` | 活动上架或下架 |
 | POST | `/reservations/{passId}` | 预约，可选择接受候补 |
 | GET | `/reservations/requests/{requestId}` | 查询预约或候补状态 |
@@ -173,10 +180,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\activity-search-te
 | DELETE | `/reservations/waitlist/{requestId}` | 退出候补 |
 | POST / GET / DELETE | `/story-comments` | 发布、查询和删除动态评论 |
 | PUT / DELETE / GET | `/subscriptions/{targetUserId}` | 订阅、取消订阅、查询状态 |
+| POST | `/stories/drafts` | 幂等创建草稿 |
+| PUT / DELETE | `/stories/{id}` | 版本化编辑、删除 |
+| POST | `/stories/{id}/attachments` | 申请固定 staging 键的签名 PUT |
+| POST | `/stories/attachments/{id}/confirm` | 封存与实际图片校验 |
+| POST | `/stories/{id}/publish` | 状态推进与可靠信息流事件 |
+| GET | `/stories/{id}` | 公开已发布笔记或作者自己的草稿 |
 
 ## 学习顺序
 
-先读 [00-先读这里](docs/00-先读这里.md)，再按 [01-项目全景与代码地图](docs/01-项目全景与代码地图.md) 定位代码。预约与候补的核心推理在 [02-预约一致性与候补补位](docs/02-预约一致性与候补补位.md)，缓存与安全在 [03-缓存限流与安全](docs/03-缓存限流与安全.md)，面试表达和简历边界分别在 [04-面试讲法与追问](docs/04-面试讲法与追问.md) 与 [07-简历项目写法](docs/07-简历项目写法.md)。五项可靠性升级的最终代码与能力边界见 [08-v4 可靠性升级](docs/08-v4可靠性升级.md)，全文检索的字段、分页、版本与重建见 [09-活动全文检索与索引治理](docs/09-活动全文检索与索引治理.md)。
+三个现行学习入口：[01-异步预约与候补调度](01-异步预约与候补调度.md)、[02-多级缓存一致性](02-多级缓存一致性.md)、[03-活动笔记发布与文件管理](03-活动笔记发布与文件管理.md)。再用 [代码地图](docs/01-项目全景与代码地图.md)、[v4 可靠性升级](docs/08-v4可靠性升级.md)、[简历写法](docs/07-简历项目写法.md) 定位与复习。五篇陈旧根目录学习文档及搜索专篇已退役删除。
 
 ## 工程演进说明
 

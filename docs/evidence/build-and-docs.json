@@ -1,0 +1,37 @@
+{
+  "executedAt": "2026-10-05T03:19:26.331179+08:00",
+  "javaReports": {
+    "tests": 38,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 2
+  },
+  "executedTests": 36,
+  "documents": [
+    {
+      "document": "01-异步预约与候补调度.md",
+      "diagrams": 7,
+      "annotatedCodeBlocks": 20,
+      "questions": 20,
+      "minimumAnswerParagraphs": 2
+    },
+    {
+      "document": "02-多级缓存一致性.md",
+      "diagrams": 16,
+      "annotatedCodeBlocks": 21,
+      "questions": 20,
+      "minimumAnswerParagraphs": 2
+    },
+    {
+      "document": "03-活动笔记发布与文件管理.md",
+      "diagrams": 9,
+      "annotatedCodeBlocks": 9,
+      "questions": 20,
+      "minimumAnswerParagraphs": 2
+    }
+  ],
+  "renderedImages": 32,
+  "brokenLocalLinks": 0,
+  "ossCloudIntegration": "not verified",
+  "productionLoad": "not verified"
+}

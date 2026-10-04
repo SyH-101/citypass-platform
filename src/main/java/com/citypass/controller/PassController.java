@@ -3,7 +3,7 @@ package com.citypass.controller;
 
 import com.citypass.dto.Result;
 import com.citypass.entity.ActivityPass;
-import com.citypass.dto.ActivitySearchMetadataRequest;
+import com.citypass.dto.ActivityMetadataRequest;
 import com.citypass.service.IActivityPassService;
 import org.springframework.web.bind.annotation.*;
 
@@ -49,11 +49,11 @@ public class PassController {
        return passService.queryActivityPassOfVenue(venueId);
     }
 
-    /** Only search-facing metadata can change here; inventory, price and reservation windows are untouched. */
-    @PutMapping("/{id}/search-metadata")
-    public Result updateSearchMetadata(@PathVariable Long id,
-                                       @RequestBody ActivitySearchMetadataRequest request) {
-        return passService.updateSearchMetadata(id, request);
+    /** Only activity metadata can change here; inventory, price and reservation windows are untouched. */
+    @PutMapping("/{id}/metadata")
+    public Result updateMetadata(@PathVariable Long id,
+                                       @RequestBody ActivityMetadataRequest request) {
+        return passService.updateMetadata(id, request);
     }
 
     @PutMapping("/{id}/status")

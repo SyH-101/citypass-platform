@@ -1,6 +1,7 @@
 param(
     [string]$BaseUrl = 'http://localhost:8080',
-    [int]$TerminalTimeoutSeconds = 90
+    [int]$TerminalTimeoutSeconds = 90,
+    [string]$Project = 'citypass'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -17,7 +18,7 @@ function New-TestPhone {
 function Login-TestUser([string]$Phone) {
     $sent = Invoke-RestMethod -Method Post -Uri "$BaseUrl/user/code?phone=$Phone"
     Assert-True $sent.success "Verification code request failed: $($sent.errorMsg)"
-    $code = (docker compose exec -T redis redis-cli GET "login:code:$Phone").Trim()
+    $code = (docker compose -p $Project exec -T redis redis-cli GET "login:code:$Phone").Trim()
     Assert-True ($code -match '^\d{6}$') "Verification code not found in Redis: $Phone"
     $body = @{ phone = $Phone; code = $code } | ConvertTo-Json
     $login = Invoke-RestMethod -Method Post -Uri "$BaseUrl/user/login" -ContentType 'application/json' -Body $body
@@ -39,7 +40,7 @@ function Wait-RedisStock([long]$PassId, [string]$Expected) {
     $deadline = (Get-Date).AddSeconds(20)
     do {
         Start-Sleep -Milliseconds 250
-        $actual = (docker compose exec -T redis redis-cli GET "reservation:stock:$PassId").Trim()
+        $actual = (docker compose -p $Project exec -T redis redis-cli GET "reservation:stock:$PassId").Trim()
         if ($actual -eq $Expected) { return }
     } while ((Get-Date) -lt $deadline)
     throw "Redis stock mismatch: passId=$PassId, expected=$Expected, actual=$actual"
@@ -97,9 +98,11 @@ $storyBody = @{
     images = ''
     content = 'Notes about the venue, live atmosphere, and reservation experience.'
 } | ConvertTo-Json
-$storyCreated = Invoke-RestMethod -Method Post -Uri "$BaseUrl/stories" -Headers $headers[0] -ContentType 'application/json' -Body $storyBody
+$storyCreated = Invoke-RestMethod -Method Post -Uri "$BaseUrl/stories/drafts" -Headers (@{authorization=$tokens[0];'Idempotency-Key'=[guid]::NewGuid().ToString()}) -ContentType 'application/json' -Body $storyBody
 Assert-True $storyCreated.success "Story creation failed: $($storyCreated.errorMsg)"
-$storyId = [long]$storyCreated.data
+$storyId = [long]$storyCreated.data.id
+$published = Invoke-RestMethod -Method Post -Uri "$BaseUrl/stories/$storyId/publish?version=$($storyCreated.data.version)" -Headers $headers[0]
+Assert-True $published.success 'Story publication failed'
 
 $commentBody = @{ storyId = $storyId; content = 'The waitlist notification arrived on time.' } | ConvertTo-Json
 $commentCreated = Invoke-RestMethod -Method Post -Uri "$BaseUrl/story-comments" -Headers $headers[1] -ContentType 'application/json' -Body $commentBody
@@ -152,8 +155,8 @@ $futureRequest = New-Reservation $headers[2] $futurePassId $false
 $futureResult = Wait-Reservation $headers[2] $futureRequest @('FAIL_NOT_STARTED')
 Assert-True ($futureResult.data.status -eq 'FAIL_NOT_STARTED') 'Future activity accepted an early reservation'
 
-$dbStock = (docker compose exec -T -e MYSQL_PWD=123456 mysql mysql -uroot -N -e "SELECT stock FROM citypass.tb_limited_pass_stock WHERE activity_pass_id=$passId;").Trim()
-$orderStates = (docker compose exec -T -e MYSQL_PWD=123456 mysql mysql -uroot -N -e "SELECT GROUP_CONCAT(CONCAT(source,':',status) ORDER BY id) FROM citypass.tb_reservation_order WHERE activity_pass_id=$passId;").Trim()
+$dbStock = (docker compose -p $Project exec -T -e MYSQL_PWD=123456 mysql mysql -uroot -N -e "SELECT stock FROM citypass.tb_limited_pass_stock WHERE activity_pass_id=$passId;").Trim()
+$orderStates = (docker compose -p $Project exec -T -e MYSQL_PWD=123456 mysql mysql -uroot -N -e "SELECT GROUP_CONCAT(CONCAT(source,':',status) ORDER BY id) FROM citypass.tb_reservation_order WHERE activity_pass_id=$passId;").Trim()
 Assert-True ($dbStock -eq '0') "Database stock mismatch: $dbStock"
 
 [pscustomobject]@{

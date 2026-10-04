@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CityPass · 活动笔记工作台</title><link rel="stylesheet" href="/debug/story-files.css"><script src="/debug/story-files.js" defer></script></head>
+<body>
+<main>
+  <header><p class="eyebrow">CityPass / 本地开发</p><h1>把城市体验写成笔记</h1><p>创建草稿，上传现场图片，再分享给订阅你的读者。</p></header>
+  <section class="panel" aria-labelledby="login-title"><h2 id="login-title">登录</h2>
+    <form id="login-form" novalidate>
+      <div class="row"><div><label for="phone">手机号</label><input id="phone" type="tel" autocomplete="tel" placeholder="请输入手机号"></div><button id="send-code" onclick="storyActions['send-code']()" type="button">发送验证码</button></div>
+      <div class="row"><div><label for="code">验证码</label><input id="code" inputmode="numeric" autocomplete="one-time-code"></div><button type="submit">登录</button></div>
+      <p class="help">开发环境在本地 Redis 获取验证码。已有登录令牌也可粘贴到下方，令牌仅保存在当前页面内存中。</p>
+      <div class="row"><div><label for="token">已有令牌</label><input id="token" type="password" autocomplete="off"></div><button id="show-token" onclick="storyActions['show-token']()" type="button" aria-pressed="false">显示令牌</button><button id="use-token" onclick="storyActions['use-token']()" type="button">使用令牌</button></div>
+    </form>
+  </section>
+  <p id="feedback" role="status" aria-live="polite">请先登录或使用已有令牌。</p>
+  <div class="workspace">
+  <section class="panel" aria-labelledby="edit-title"><h2 id="edit-title">编辑活动笔记</h2><p id="story-state">尚未创建草稿</p>
+    <form id="edit-form" novalidate>
+      <label for="title">标题</label><input id="title" maxlength="255" aria-describedby="title-error" placeholder="例如：滨江艺术中心的周末演出"><small id="title-error" class="field-error"></small>
+      <label for="content">正文</label><textarea id="content" maxlength="2048" rows="7" style="resize: none" aria-describedby="content-error" placeholder="写下活动体验、交通提示或预约心得"></textarea><small id="content-error" class="field-error"></small>
+      <label for="activity">关联活动编号（可选）</label><input id="activity" inputmode="numeric" placeholder="活动需要处于上架状态">
+      <div class="actions"><button id="create" onclick="storyActions['create']()" type="button">创建草稿</button><button id="save" type="submit" disabled>保存修改</button><button id="refresh" onclick="storyActions['refresh']()" type="button" disabled>读取最新版本</button></div>
+      <p class="help">重新读取会覆盖当前编辑框。请先保留未保存的内容。</p>
+    </form>
+    <h3>图片</h3><p class="help">JPEG / PNG，每张最多 10 MiB，每篇最多 9 张。上传后自动确认；失败可重试或移除。</p>
+    <label for="files">选择现场图片</label><input id="files" type="file" accept="image/jpeg,image/png" multiple disabled>
+    <button id="cancel-upload" onclick="storyActions['cancel-upload']()" type="button" hidden>取消当前上传</button>
+    <ol id="attachments"><li class="empty">还没有图片，先创建草稿后选择图片。</li></ol>
+    <div class="actions"><button id="publish" onclick="storyActions['publish']()" type="button" disabled>发布笔记</button><button id="view" onclick="storyActions['view']()" type="button" disabled>查看笔记</button></div>
+    <div class="danger-zone"><button id="delete" onclick="storyActions['delete']()" class="danger" type="button" disabled>删除笔记</button><div id="delete-confirm" hidden><p>删除当前笔记后，内容将不可见，文件会在等待期后清理。</p><button id="cancel-delete" onclick="storyActions['cancel-delete']()" type="button">保留笔记</button><button id="confirm-delete" onclick="storyActions['confirm-delete']()" class="danger" type="button">确认删除当前笔记</button></div></div>
+  </section>
+  <section class="panel preview" aria-labelledby="preview-title"><h2 id="preview-title">笔记预览</h2><article id="preview"><p>发布或查看笔记后，这里显示真实服务返回的内容与图片。</p></article></section>
+  </div>
+</main>
+</body></html>

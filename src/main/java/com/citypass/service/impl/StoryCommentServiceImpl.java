@@ -48,8 +48,9 @@ public class StoryCommentServiceImpl extends ServiceImpl<StoryCommentMapper, Sto
         if (UserHolder.getUser() == null) {
             return Result.fail("用户未登录");
         }
-        Story story = storyMapper.selectById(comment.getStoryId());
-        if (story == null) {
+        Story story = storyMapper.selectOne(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<Story>()
+                .eq("id",comment.getStoryId()).last("FOR UPDATE"));
+        if (story == null || !"PUBLISHED".equals(story.getStatus())) {
             return Result.fail("动态不存在");
         }
         long parentId = comment.getParentId() == null ? 0L : comment.getParentId();
@@ -82,6 +83,8 @@ public class StoryCommentServiceImpl extends ServiceImpl<StoryCommentMapper, Sto
         if (storyId == null) {
             return Result.fail("动态编号不能为空");
         }
+        Story story=storyMapper.selectById(storyId);
+        if(story==null || !"PUBLISHED".equals(story.getStatus())) throw com.citypass.story.StoryProblem.missing();
         int pageNo = current == null || current < 1 ? 1 : current;
         Page<StoryComment> page = lambdaQuery()
                 .eq(StoryComment::getStoryId, storyId)
@@ -102,6 +105,9 @@ public class StoryCommentServiceImpl extends ServiceImpl<StoryCommentMapper, Sto
         if (existing == null || !UserHolder.getUser().getId().equals(existing.getUserId())) {
             return Result.fail("评论不存在或无权删除");
         }
+        Story story=storyMapper.selectOne(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<Story>()
+                .eq("id",existing.getStoryId()).last("FOR UPDATE"));
+        if(story==null || !"PUBLISHED".equals(story.getStatus())) throw com.citypass.story.StoryProblem.missing();
         boolean removed = lambdaUpdate()
                 .eq(StoryComment::getId, commentId)
                 .eq(StoryComment::getUserId, UserHolder.getUser().getId())

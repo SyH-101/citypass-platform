@@ -1,0 +1,25 @@
+{
+  "run": "6faf408c26f24d189b5f65f4eb83ebef",
+  "project": "citypassfiles",
+  "executedAt": "2026-10-05T02:38:14.6747981+08:00",
+  "checks": [
+    "draft creation idempotency",
+    "draft read and write ownership",
+    "real PUT, concurrent and repeated confirmation, binding, publication and feed",
+    "private final object, staging reuse cannot overwrite, key and signature binding",
+    "concurrent versioned edit conflict",
+    "missing object, fake format, actual byte limit and pixel limit",
+    "all public lists and interactions filter draft, old file writes retired",
+    "feed cursor advances over hidden rows and equal timestamps",
+    "copy-before-DB-failure retry and unadopted attempt cleanup",
+    "publication and outbox roll back together",
+    "cleanup versus binding permits only protected READY or explicit rejection",
+    "delete idempotency, delayed publish cannot resurrect, expired GET, physical cleanup",
+    "expired PUT rejected",
+    "late write reappearance is removed by tombstone sweep",
+    "expired draft, unconfirmed upload and never-uploaded reservation cleanup",
+    "storage outage retries and process restart resume persistent cleanup",
+    "external deletion before DB ack failure, missing-object retry succeeds"
+  ],
+  "passed": 17
+}

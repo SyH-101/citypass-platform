@@ -1,3 +1,6 @@
+-- RETIRED in v6. Kept to preserve the incremental v2 -> v3 -> v4 -> v5 -> v6 migration chain.
+-- Business activity metadata remains in use; search_version/rebuild state are historical only.
+-- Never start an old search-enabled instance after applying v6.
 -- Activity search metadata and rebuild guard. Apply after migration-v4-reliability.sql on MySQL 8.
 ALTER TABLE `tb_activity_pass`
   ADD COLUMN `description` varchar(2000) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL COMMENT '活动介绍' AFTER `rules`,

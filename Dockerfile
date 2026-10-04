@@ -1,5 +1,6 @@
 FROM maven:3.9.9-eclipse-temurin-8 AS build
 WORKDIR /workspace
+ENV MAVEN_OPTS="-Xmx384m"
 COPY pom.xml .
 RUN mvn -q -DskipTests dependency:go-offline
 COPY src src

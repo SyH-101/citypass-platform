@@ -17,6 +17,7 @@ services:
     volumes:
       - mysql-data:/var/lib/mysql
       - ./src/main/resources/db/citypass.sql:/docker-entrypoint-initdb.d/00-citypass.sql:ro
+      - ./deploy/mysql/migration-v6-story-files.sql:/docker-entrypoint-initdb.d/02-story-files.sql:ro
       - ./deploy/mysql/01-canal-user.sql:/docker-entrypoint-initdb.d/01-canal-user.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p123456"]
@@ -28,7 +29,7 @@ services:
     image: redis:7.2-alpine
     command: redis-server --appendonly yes
     ports:
-      - "6379:6379"
+      - "${REDIS_HOST_PORT:-6379}:6379"
     volumes:
       - redis-data:/data
     healthcheck:
@@ -37,31 +38,51 @@ services:
       timeout: 3s
       retries: 20
 
-  elasticsearch:
+  minio:
+    image: citypass-minio-local:2025-04-22
     build:
       context: .
-      dockerfile: deploy/elasticsearch/Dockerfile
-    profiles: ["search"]
+      dockerfile: deploy/minio/Dockerfile
+    command: minio server /data --console-address ":9001"
     environment:
-      discovery.type: single-node
-      xpack.security.enabled: "false"
-      action.auto_create_index: "false"
-      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:-citypass-local}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:-citypass-local-change-me}"
+      MINIO_API_CORS_ALLOW_ORIGIN: "${STORY_CORS_ORIGINS:-http://localhost:8080,http://localhost:8081}"
     ports:
-      - "9200:9200"
+      - "127.0.0.1:${MINIO_HOST_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
-      - elasticsearch-data:/usr/share/elasticsearch/data
+      - minio-data:/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9200/_cluster/health >/dev/null"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:9000/minio/health/live"]
       interval: 5s
       timeout: 3s
-      retries: 40
+      retries: 30
+
+  minio-init:
+    image: citypass-minio-local:2025-04-22
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - >-
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" &&
+        mc mb --ignore-existing "local/$$OBJECT_STORAGE_BUCKET" &&
+        mc anonymous set none "local/$$OBJECT_STORAGE_BUCKET"
+    environment:
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:-citypass-local}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:-citypass-local-change-me}"
+      OBJECT_STORAGE_BUCKET: "${OBJECT_STORAGE_BUCKET:-citypass-story-files}"
+    depends_on:
+      minio:
+        condition: service_healthy
 
   namesrv:
     image: apache/rocketmq:4.9.7
     command: sh mqnamesrv
+    environment:
+      JAVA_OPT_EXT: -Xms128m -Xmx128m -Xmn64m
     ports:
-      - "9876:9876"
+      - "${NAMESRV_HOST_PORT:-9876}:9876"
 
   rocketmq-init:
     image: alpine:3.20
@@ -75,9 +96,10 @@ services:
     command: sh mqbroker -c /home/rocketmq/rocketmq-4.9.7/conf/broker.conf
     environment:
       NAMESRV_ADDR: namesrv:9876
+      JAVA_OPT_EXT: -Xms256m -Xmx256m -Xmn128m -XX:MaxDirectMemorySize=128m
     ports:
-      - "10909:10909"
-      - "10911:10911"
+      - "${BROKER_FAST_HOST_PORT:-10909}:10909"
+      - "${BROKER_HOST_PORT:-10911}:10911"
     volumes:
       - ./deploy/rocketmq/broker.conf:/home/rocketmq/rocketmq-4.9.7/conf/broker.conf:ro
       - rocketmq-store:/home/rocketmq/store
@@ -115,15 +137,31 @@ services:
       GATEWAY_CACHE_PURGE_URL: "${GATEWAY_CACHE_PURGE_URL:-}"
       CANAL_ENABLED: "${CANAL_ENABLED:-false}"
       RELIABLE_TASK_ADMIN_TOKEN: "${RELIABLE_TASK_ADMIN_TOKEN:-}"
-      SEARCH_ENABLED: "${SEARCH_ENABLED:-false}"
-      SEARCH_HOSTS: http://elasticsearch:9200
-      SEARCH_CURSOR_SECRET: "${SEARCH_CURSOR_SECRET:-}"
-      SEARCH_PIT_KEEP_ALIVE_SECONDS: "${SEARCH_PIT_KEEP_ALIVE_SECONDS:-60}"
+      OBJECT_STORAGE_PROVIDER: "${OBJECT_STORAGE_PROVIDER:-minio}"
+      OBJECT_STORAGE_ENDPOINT: "${OBJECT_STORAGE_ENDPOINT:-http://minio:9000}"
+      OBJECT_STORAGE_PUBLIC_ENDPOINT: "${OBJECT_STORAGE_PUBLIC_ENDPOINT:-http://localhost:9000}"
+      OBJECT_STORAGE_BUCKET: "${OBJECT_STORAGE_BUCKET:-citypass-story-files}"
+      OBJECT_STORAGE_REGION: "${OBJECT_STORAGE_REGION:-us-east-1}"
+      OBJECT_STORAGE_ACCESS_KEY: "${OBJECT_STORAGE_ACCESS_KEY:-citypass-local}"
+      OBJECT_STORAGE_SECRET_KEY: "${OBJECT_STORAGE_SECRET_KEY:-citypass-local-change-me}"
+      STORY_DEBUG_PAGE_ENABLED: "${STORY_DEBUG_PAGE_ENABLED:-true}"
+      STORY_FILE_UPLOAD_SECONDS: "${STORY_FILE_UPLOAD_SECONDS:-300}"
+      STORY_FILE_CLEANUP_GRACE_SECONDS: "${STORY_FILE_CLEANUP_GRACE_SECONDS:-120}"
+      STORY_FILE_READ_SECONDS: "${STORY_FILE_READ_SECONDS:-120}"
+      STORY_FILE_TOMBSTONE_RESCAN_SECONDS: "${STORY_FILE_TOMBSTONE_RESCAN_SECONDS:-3600}"
+      STORY_FILE_MAX_BYTES: "${STORY_FILE_MAX_BYTES:-10485760}"
+      STORY_FILE_MAX_PIXELS: "${STORY_FILE_MAX_PIXELS:-20000000}"
+      STORY_FILE_MAX_DIMENSION: "${STORY_FILE_MAX_DIMENSION:-10000}"
+      STORY_FILE_MAX_IMAGES: "${STORY_FILE_MAX_IMAGES:-9}"
+      STORY_FILE_PENDING_QUOTA: "${STORY_FILE_PENDING_QUOTA:-20}"
+      STORY_FILE_DRAFT_HOURS: "${STORY_FILE_DRAFT_HOURS:-24}"
+      STORY_FILE_CONFIRMATION_LEASE_SECONDS: "${STORY_FILE_CONFIRMATION_LEASE_SECONDS:-60}"
+      STORY_FILE_IO_CONCURRENCY: "${STORY_FILE_IO_CONCURRENCY:-4}"
       CITYPASS_UPLOAD_DIR: /app/data/images
       TZ: Asia/Shanghai
-      JAVA_TOOL_OPTIONS: -Duser.timezone=Asia/Shanghai
+      JAVA_TOOL_OPTIONS: -Duser.timezone=Asia/Shanghai -Xms128m -Xmx384m
     ports:
-      - "8081:8081"
+      - "${APP_HOST_PORT:-8081}:8081"
     volumes:
       - app-images:/app/data/images
     depends_on:
@@ -133,6 +171,8 @@ services:
         condition: service_healthy
       broker:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
 
   openresty:
     image: openresty/openresty:1.25.3.2-alpine
@@ -140,7 +180,7 @@ services:
       VENUE_READ_RATE_PER_SECOND: "${VENUE_READ_RATE_PER_SECOND:-60}"
       VENUE_READ_BURST: "${VENUE_READ_BURST:-120}"
     ports:
-      - "8080:80"
+      - "${GATEWAY_HOST_PORT:-8080}:80"
     volumes:
       - ./src/main/resources/openresty/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
       - ./src/main/resources/openresty/lua:/usr/local/openresty/nginx/lua:ro
@@ -173,8 +213,8 @@ services:
         condition: service_healthy
 
 volumes:
+  minio-data:
   mysql-data:
   redis-data:
   rocketmq-store:
   app-images:
-  elasticsearch-data:

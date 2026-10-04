@@ -2,7 +2,7 @@ package com.citypass.service;
 
 import com.citypass.dto.Result;
 import com.citypass.entity.ActivityPass;
-import com.citypass.dto.ActivitySearchMetadataRequest;
+import com.citypass.dto.ActivityMetadataRequest;
 import com.baomidou.mybatisplus.extension.service.IService;
 
 /**
@@ -20,7 +20,7 @@ public interface IActivityPassService extends IService<ActivityPass> {
 
     void addActivityPass(ActivityPass pass);
 
-    Result updateSearchMetadata(Long id, ActivitySearchMetadataRequest request);
+    Result updateMetadata(Long id, ActivityMetadataRequest request);
 
     Result updateStatus(Long id, Integer status);
 }

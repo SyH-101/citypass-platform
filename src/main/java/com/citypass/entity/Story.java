@@ -39,6 +39,15 @@ public class Story implements Serializable {
      * 用户id
      */
     private Long userId;
+
+    private Long activityPassId;
+    private String status;
+    private Long version;
+    private LocalDateTime publishTime;
+    private LocalDateTime draftExpiresAt;
+    private String clientKey;
+    @TableField(exist = false)
+    private java.util.List<java.util.Map<String,Object>> attachments;
     /**
      * 用户图标
      */

@@ -1,5 +1,5 @@
 param(
-    [string]$Project = 'citypassv4',
+    [string]$Project = 'citypass',
     [string]$BaseUrl = 'http://localhost:8081',
     [int]$Users = 100
 )

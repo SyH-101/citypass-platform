@@ -26,11 +26,6 @@ public class StoryController {
     @Resource
     private IStoryService storyService;
 
-    @PostMapping
-    public Result saveStory(@RequestBody Story story) {
-        return storyService.saveStory(story);
-    }
-
     @PutMapping("/like/{id}")
     public Result likeStory(@PathVariable("id") Long id) {
         return storyService.likeStory(id);
@@ -38,14 +33,7 @@ public class StoryController {
 
     @GetMapping("/of/me")
     public Result queryMyStory(@RequestParam(value = "current", defaultValue = "1") Integer current) {
-        // 获取登录用户
-        UserDTO user = UserHolder.getUser();
-        // 根据用户查询
-        Page<Story> page = storyService.query()
-                .eq("user_id", user.getId()).page(new Page<>(current, SystemConstants.MAX_PAGE_SIZE));
-        // 获取当前页数据
-        List<Story> records = page.getRecords();
-        return Result.ok(records);
+        return storyService.queryByAuthor(UserHolder.getUser().getId(), current, true);
     }
 
     @GetMapping("/hot")
@@ -67,12 +55,7 @@ public class StoryController {
     public Result queryStoryByUserId(
             @RequestParam(value = "current", defaultValue = "1") Integer current,
             @RequestParam("id") Long id) {
-        // 根据用户查询
-        Page<Story> page = storyService.query()
-                .eq("user_id", id).page(new Page<>(current, SystemConstants.MAX_PAGE_SIZE));
-        // 获取当前页数据
-        List<Story> records = page.getRecords();
-        return Result.ok(records);
+        return storyService.queryByAuthor(id, current, false);
     }
 
     @GetMapping("/of/subscriptions")

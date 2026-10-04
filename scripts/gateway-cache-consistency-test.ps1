@@ -1,5 +1,5 @@
 param(
-    [string]$Project = 'citypassgateway',
+    [string]$Project = 'citypass',
     [string]$GatewayUrl = 'http://localhost:8080',
     [string]$JavaUrl = 'http://localhost:8081',
     [switch]$SkipBuild

@@ -35,6 +35,8 @@ public class LoginInterceptor implements HandlerInterceptor {
                 || uri.startsWith("/passes/")
                 || uri.startsWith("/venue-categories/")
                 || uri.matches("/stories/\\d+")
+                || uri.matches("/stories/\\d+/attachments/\\d+/url")
+                || uri.matches("/stories/\\d+/legacy-images/\\d+")
                 || uri.startsWith("/stories/likes/")
                 || uri.equals("/stories/of/user")
                 || uri.startsWith("/story-comments/story/");

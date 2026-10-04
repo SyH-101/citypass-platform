@@ -19,7 +19,8 @@ public class ReliableTaskRepository {
     public static final String INIT_RESERVATION_STOCK = "INIT_RESERVATION_STOCK";
     public static final String TRANSFER_RESERVATION_CLAIM = "TRANSFER_RESERVATION_CLAIM";
     public static final String INVALIDATE_VENUE_CACHE = "INVALIDATE_VENUE_CACHE";
-    public static final String INDEX_ACTIVITY_SEARCH = "INDEX_ACTIVITY_SEARCH";
+    public static final String STORY_FEED = "STORY_FEED";
+    public static final String DELETE_STORY_FILE = "DELETE_STORY_FILE";
 
     public enum FailureDisposition { RETRY, DEAD, LOST_LEASE }
 
@@ -50,17 +51,10 @@ public class ReliableTaskRepository {
      */
     @Transactional(rollbackFor = Exception.class)
     public List<ReliableTask> claimReady(int limit, String owner, int leaseSeconds) {
-        return claimReady(limit, owner, leaseSeconds, true);
-    }
-
-    /** Search tasks remain pending while the optional module is disabled. */
-    @Transactional(rollbackFor = Exception.class)
-    public List<ReliableTask> claimReady(int limit, String owner, int leaseSeconds, boolean includeSearchTasks) {
-        String searchFilter = includeSearchTasks ? "" : " AND task_type<>'" + INDEX_ACTIVITY_SEARCH + "'";
         List<ReliableTask> candidates = jdbcTemplate.query(
                 "SELECT id,task_type,payload,retry_count,max_retry,version FROM tb_reliable_task " +
                         "WHERE ((status='PENDING' AND next_retry_time<=NOW()) " +
-                        "OR (status='RUNNING' AND lease_until<=NOW())) " + searchFilter +
+                        "OR (status='RUNNING' AND lease_until<=NOW())) " +
                         "ORDER BY id LIMIT ? FOR UPDATE SKIP LOCKED",
                 new Object[]{limit},
                 (rs, rowNum) -> {

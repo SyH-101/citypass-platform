@@ -1,0 +1,17 @@
+{
+  "passed": 8,
+  "run": "2e1c42804fb945b59781d80c8fc1cd78",
+  "executedAt": "2026-10-05T03:17:58.8413626+08:00",
+  "checks": [
+    "retained legacy bytes and public story",
+    "no-store response",
+    "position boundary",
+    "anonymous and foreign draft denied",
+    "owner draft read",
+    "traversal denied",
+    "real-path symlink boundary",
+    "deleted legacy story denied"
+  ],
+  "storyId": 62,
+  "project": "citypassfiles"
+}
