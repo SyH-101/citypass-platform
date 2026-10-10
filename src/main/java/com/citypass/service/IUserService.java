@@ -4,7 +4,6 @@ import com.baomidou.mybatisplus.extension.service.IService;
 import com.citypass.dto.LoginFormDTO;
 import com.citypass.dto.Result;
 import com.citypass.entity.User;
-
 import javax.servlet.http.HttpSession;
 
 /**
@@ -25,5 +24,4 @@ public interface IUserService extends IService<User> {
     Result sign();
 
     Result signCount();
-
 }

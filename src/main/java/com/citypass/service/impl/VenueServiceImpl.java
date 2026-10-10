@@ -21,11 +21,9 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.domain.geo.GeoReference;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
 import javax.annotation.Resource;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
-
 import static com.citypass.utils.RedisConstants.*;
 
 /**
@@ -37,7 +35,6 @@ import static com.citypass.utils.RedisConstants.*;
  */
 @Service
 public class VenueServiceImpl extends ServiceImpl<VenueMapper, Venue> implements IVenueService {
-
 
     @Resource
     private StringRedisTemplate stringRedisTemplate;
@@ -54,12 +51,18 @@ public class VenueServiceImpl extends ServiceImpl<VenueMapper, Venue> implements
     @Override
     public Result queryById(Long id) {
         // 多级缓存：Caffeine(L1 JVM) → Redis逻辑过期(L2) → MySQL(L3)
-        Venue venue = multiLevelCache
-                .queryWithMultiLevel(CACHE_VENUE_KEY, id, Venue.class, this::getById, CACHE_VENUE_TTL, TimeUnit.MINUTES);
-
+        Venue venue =
+                multiLevelCache.queryWithMultiLevel(
+                        CACHE_VENUE_KEY,
+                        id,
+                        Venue.class,
+                        this::getById,
+                        CACHE_VENUE_TTL,
+                        TimeUnit.MINUTES);
         if (venue == null) {
             return Result.fail("场馆不存在！");
         }
+
         return Result.ok(venue);
     }
 
@@ -68,11 +71,18 @@ public class VenueServiceImpl extends ServiceImpl<VenueMapper, Venue> implements
      */
     @Override
     public Result queryByIdRedisBaseline(Long id) {
-        Venue venue = cacheClient
-                .queryWithPassThrough(CACHE_VENUE_BASELINE_KEY, id, Venue.class, this::getById, CACHE_VENUE_TTL, TimeUnit.MINUTES);
+        Venue venue =
+                cacheClient.queryWithPassThrough(
+                        CACHE_VENUE_BASELINE_KEY,
+                        id,
+                        Venue.class,
+                        this::getById,
+                        CACHE_VENUE_TTL,
+                        TimeUnit.MINUTES);
         if (venue == null) {
             return Result.fail("场馆不存在！");
         }
+
         return Result.ok(venue);
     }
 
@@ -88,9 +98,11 @@ public class VenueServiceImpl extends ServiceImpl<VenueMapper, Venue> implements
         if (!updated) {
             return Result.fail("场馆不存在或更新失败");
         }
+
         if (getBaseMapper().incrementCacheVersion(id) != 1) {
             throw new IllegalStateException("场馆缓存版本更新失败");
         }
+
         Venue refreshed = getById(id);
         reliableTaskRepository.enqueue(
                 ReliableTaskRepository.INVALIDATE_VENUE_CACHE,
@@ -104,30 +116,33 @@ public class VenueServiceImpl extends ServiceImpl<VenueMapper, Venue> implements
         // 1.判断是否需要根据坐标查询
         if (x == null || y == null) {
             // 不需要坐标查询，按数据库查询
-            Page<Venue> page = query()
-                    .eq("category_id", categoryId)
-                    .page(new Page<>(current, SystemConstants.DEFAULT_PAGE_SIZE));
+            Page<Venue> page =
+                    query().eq("category_id", categoryId)
+                            .page(new Page<>(current, SystemConstants.DEFAULT_PAGE_SIZE));
             // 返回数据
             return Result.ok(page.getRecords());
         }
-
         // 2.计算分页参数
         int from = (current - 1) * SystemConstants.DEFAULT_PAGE_SIZE;
         int end = current * SystemConstants.DEFAULT_PAGE_SIZE;
-
         // 3.查询redis、按照距离排序、分页。结果：venueId、distance
         String key = VENUE_GEO_KEY + categoryId;
-        GeoResults<RedisGeoCommands.GeoLocation<String>> results = stringRedisTemplate.opsForGeo() // GEOSEARCH key BYLONLAT x y BYRADIUS 10 WITHDISTANCE
-                .search(
-                        key,
-                        GeoReference.fromCoordinate(x, y),
-                        new Distance(5000),
-                        RedisGeoCommands.GeoSearchCommandArgs.newGeoSearchArgs().includeDistance().limit(end)
-                );
+        GeoResults<RedisGeoCommands.GeoLocation<String>>
+                results = // GEOSEARCH key BYLONLAT x y BYRADIUS 10 WITHDISTANCE
+                stringRedisTemplate
+                                .opsForGeo()
+                                .search(
+                                        key,
+                                        GeoReference.fromCoordinate(x, y),
+                                        new Distance(5000),
+                                        RedisGeoCommands.GeoSearchCommandArgs.newGeoSearchArgs()
+                                                .includeDistance()
+                                                .limit(end));
         // 4.解析出id
         if (results == null) {
             return Result.ok(Collections.emptyList());
         }
+
         List<GeoResult<RedisGeoCommands.GeoLocation<String>>> list = results.getContent();
         if (list.size() <= from) {
             // 没有下一页了，结束
@@ -136,14 +151,17 @@ public class VenueServiceImpl extends ServiceImpl<VenueMapper, Venue> implements
         // 4.1.截取 from ~ end的部分
         List<Long> ids = new ArrayList<>(list.size());
         Map<String, Distance> distanceMap = new HashMap<>(list.size());
-        list.stream().skip(from).forEach(result -> {
-            // 4.2.获取场馆id
-            String venueIdStr = result.getContent().getName();
-            ids.add(Long.valueOf(venueIdStr));
-            // 4.3.获取距离
-            Distance distance = result.getDistance();
-            distanceMap.put(venueIdStr, distance);
-        });
+        list.stream()
+                .skip(from)
+                .forEach(
+                        result -> {
+                            // 4.2.获取场馆id
+                            String venueIdStr = result.getContent().getName();
+                            ids.add(Long.valueOf(venueIdStr));
+                            // 4.3.获取距离
+                            Distance distance = result.getDistance();
+                            distanceMap.put(venueIdStr, distance);
+                        });
         // 5.根据id查询Venue
         String idStr = StrUtil.join(",", ids);
         List<Venue> venues = query().in("id", ids).last("ORDER BY FIELD(id," + idStr + ")").list();

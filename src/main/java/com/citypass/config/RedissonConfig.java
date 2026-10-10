@@ -26,13 +26,15 @@ public class RedissonConfig {
     public RedissonClient redissonClient() {
         Config config = new Config();
         String address = "redis://" + redisHost + ":" + redisPort;
-        org.redisson.config.SingleServerConfig server = config.useSingleServer()
-                .setAddress(address)
-                .setConnectTimeout(Math.max(100, redisCommandTimeoutMs))
-                .setTimeout(Math.max(100, redisCommandTimeoutMs));
+        org.redisson.config.SingleServerConfig server =
+                config.useSingleServer()
+                        .setAddress(address)
+                        .setConnectTimeout(Math.max(100, redisCommandTimeoutMs))
+                        .setTimeout(Math.max(100, redisCommandTimeoutMs));
         if (redisPassword != null && !redisPassword.isEmpty()) {
             server.setPassword(redisPassword);
         }
+
         return Redisson.create(config);
     }
 }

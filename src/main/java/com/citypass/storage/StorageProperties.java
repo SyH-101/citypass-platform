@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 @Component
 @ConfigurationProperties(prefix = "object-storage")
 public class StorageProperties {
+
     private String provider = "minio";
     private String endpoint = "http://127.0.0.1:9000";
     private String publicEndpoint = "http://localhost:9000";

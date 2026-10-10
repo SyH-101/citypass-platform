@@ -17,7 +17,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.connection.BitFieldSubCommands;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
-
 import javax.annotation.Resource;
 import javax.servlet.http.HttpSession;
 import java.time.LocalDateTime;
@@ -26,7 +25,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
-
 import static com.citypass.utils.RedisConstants.*;
 import static com.citypass.utils.SystemConstants.USER_NICK_NAME_PREFIX;
 
@@ -53,10 +51,10 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         }
         // 3.符合，生成验证码
         String code = RandomUtil.randomNumbers(6);
-
         // 4.保存验证码到 session
-        stringRedisTemplate.opsForValue().set(LOGIN_CODE_KEY + phone, code, LOGIN_CODE_TTL, TimeUnit.MINUTES);
-
+        stringRedisTemplate
+                .opsForValue()
+                .set(LOGIN_CODE_KEY + phone, code, LOGIN_CODE_TTL, TimeUnit.MINUTES);
         // 5.发送验证码（教学项目不真实发短信，看控制台/日志拿验证码）
         log.info("发送短信验证码成功，验证码：{}", code);
         // 返回ok
@@ -78,34 +76,33 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
             // 不一致，报错
             return Result.fail("验证码错误");
         }
-
         // 4.一致，根据手机号查询用户 select * from tb_user where phone = ?
         User user = query().eq("phone", phone).one();
-
         // 5.判断用户是否存在
         if (user == null) {
             // 6.不存在，创建新用户并保存
             user = createUserWithPhone(phone);
         }
-
         // 7.保存用户信息到 redis中
         // 7.1.随机生成token，作为登录令牌
         String token = UUID.randomUUID().toString(true);
         // 7.2.将User对象转为HashMap存储
         UserDTO userDTO = BeanUtil.copyProperties(user, UserDTO.class);
-        Map<String, Object> userMap = BeanUtil.beanToMap(userDTO, new HashMap<>(),
-                CopyOptions.create()
-                        .setIgnoreNullValue(true)
-                        .setFieldValueEditor((fieldName, fieldValue) -> fieldValue.toString()));
+        Map<String, Object> userMap =
+                BeanUtil.beanToMap(
+                        userDTO,
+                        new HashMap<>(),
+                        CopyOptions.create()
+                                .setIgnoreNullValue(true)
+                                .setFieldValueEditor(
+                                        (fieldName, fieldValue) -> fieldValue.toString()));
         // 7.3.存储
         String tokenKey = LOGIN_USER_KEY + token;
         stringRedisTemplate.opsForHash().putAll(tokenKey, userMap);
         // 7.4.设置token有效期
         stringRedisTemplate.expire(tokenKey, LOGIN_USER_TTL, TimeUnit.MINUTES);
-
         // 验证码只能使用一次，防止有效期内被重复登录。
         stringRedisTemplate.delete(LOGIN_CODE_KEY + phone);
-
         // 8.返回token
         return Result.ok(token);
     }
@@ -115,6 +112,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         if (token == null || token.trim().isEmpty()) {
             return Result.fail("缺少登录令牌");
         }
+
         stringRedisTemplate.delete(LOGIN_USER_KEY + token.trim());
         UserHolder.removeUser();
         return Result.ok();
@@ -148,15 +146,19 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         // 4.获取今天是本月的第几天
         int dayOfMonth = now.getDayOfMonth();
         // 5.获取本月截止今天为止的所有的签到记录，返回的是一个十进制的数字 BITFIELD sign:5:202203 GET u14 0
-        List<Long> result = stringRedisTemplate.opsForValue().bitField(
-                key,
-                BitFieldSubCommands.create()
-                        .get(BitFieldSubCommands.BitFieldType.unsigned(dayOfMonth)).valueAt(0)
-        );
+        List<Long> result =
+                stringRedisTemplate
+                        .opsForValue()
+                        .bitField(
+                                key,
+                                BitFieldSubCommands.create()
+                                        .get(BitFieldSubCommands.BitFieldType.unsigned(dayOfMonth))
+                                        .valueAt(0));
         if (result == null || result.isEmpty()) {
             // 没有任何签到结果
             return Result.ok(0);
         }
+
         Long num = result.get(0);
         if (num == null || num == 0) {
             return Result.ok(0);
@@ -168,13 +170,14 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
             if ((num & 1) == 0) {
                 // 如果为0，说明未签到，结束
                 break;
-            }else {
+            } else {
                 // 如果不为0，说明已签到，计数器+1
                 count++;
             }
             // 把数字右移一位，抛弃最后一个bit位，继续下一个bit位
             num >>>= 1;
         }
+
         return Result.ok(count);
     }
 

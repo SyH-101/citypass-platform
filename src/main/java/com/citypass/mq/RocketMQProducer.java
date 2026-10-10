@@ -13,12 +13,13 @@ import org.apache.rocketmq.remoting.exception.RemotingException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
-
 import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
 import java.nio.charset.StandardCharsets;
 
-/** 预约创建消息与超时检查消息发布器。 */
+/**
+ * 预约创建消息与超时检查消息发布器。
+ */
 @Slf4j
 @Component
 @ConditionalOnProperty(name = "rocketmq.enabled", havingValue = "true")
@@ -42,10 +43,11 @@ public class RocketMQProducer implements OrderMessagePublisher {
     @Override
     public SendResult sendOrderCreate(ReservationOrder order)
             throws MQClientException, MQBrokerException, RemotingException, InterruptedException {
-        Message message = new Message(
-                RocketMQConstants.ORDER_TOPIC,
-                RocketMQConstants.ORDER_TAG_CREATE,
-                JSONUtil.toJsonStr(order).getBytes(StandardCharsets.UTF_8));
+        Message message =
+                new Message(
+                        RocketMQConstants.ORDER_TOPIC,
+                        RocketMQConstants.ORDER_TAG_CREATE,
+                        JSONUtil.toJsonStr(order).getBytes(StandardCharsets.UTF_8));
         SendResult result = producer.send(message);
         log.debug("预约请求消息发送成功, requestId={}, msgId={}", order.getId(), result.getMsgId());
         return result;
@@ -54,10 +56,11 @@ public class RocketMQProducer implements OrderMessagePublisher {
     @Override
     public SendResult sendOrderTimeout(Long orderId)
             throws MQClientException, MQBrokerException, RemotingException, InterruptedException {
-        Message message = new Message(
-                RocketMQConstants.ORDER_TOPIC,
-                RocketMQConstants.ORDER_TAG_TIMEOUT,
-                orderId.toString().getBytes(StandardCharsets.UTF_8));
+        Message message =
+                new Message(
+                        RocketMQConstants.ORDER_TOPIC,
+                        RocketMQConstants.ORDER_TAG_TIMEOUT,
+                        orderId.toString().getBytes(StandardCharsets.UTF_8));
         // 任务的 next_retry_time 已经是真实 offerExpireTime，到期后发送普通消息。
         SendResult result = producer.send(message);
         log.debug("预约超时检查消息发送成功, orderId={}, msgId={}", orderId, result.getMsgId());

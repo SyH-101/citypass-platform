@@ -5,7 +5,9 @@ import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.stereotype.Component;
 
-/** Micrometer signals for the Venue cache read path and its degradation boundary. */
+/**
+ * Micrometer signals for the Venue cache read path and its degradation boundary.
+ */
 @Component
 public class CacheReliabilityMetrics {
 
@@ -31,18 +33,50 @@ public class CacheReliabilityMetrics {
         dbFallbackAccepted = registry.counter("cache.db.fallback.accepted");
         dbFallbackRejected = registry.counter("cache.db.fallback.rejected");
         nullMarkerHit = registry.counter("cache.null.marker.hit");
-        Gauge.builder("cache.redis.failure.gate.state", redisFailureGate,
-                RedisFailureGate::stateCode).register(registry);
+        Gauge.builder(
+                        "cache.redis.failure.gate.state",
+                        redisFailureGate,
+                        RedisFailureGate::stateCode)
+                .register(registry);
     }
 
-    public void caffeineHit() { caffeineHit.increment(); }
-    public void redisHit() { redisHit.increment(); }
-    public void redisMiss() { redisMiss.increment(); }
-    public void redisError() { redisError.increment(); }
-    public void redisBypassed() { redisBypassed.increment(); }
-    public void rebuildStarted() { rebuildStarted.increment(); }
-    public void rebuildLockBusy() { rebuildLockBusy.increment(); }
-    public void dbFallbackAccepted() { dbFallbackAccepted.increment(); }
-    public void dbFallbackRejected() { dbFallbackRejected.increment(); }
-    public void nullMarkerHit() { nullMarkerHit.increment(); }
+    public void caffeineHit() {
+        caffeineHit.increment();
+    }
+
+    public void redisHit() {
+        redisHit.increment();
+    }
+
+    public void redisMiss() {
+        redisMiss.increment();
+    }
+
+    public void redisError() {
+        redisError.increment();
+    }
+
+    public void redisBypassed() {
+        redisBypassed.increment();
+    }
+
+    public void rebuildStarted() {
+        rebuildStarted.increment();
+    }
+
+    public void rebuildLockBusy() {
+        rebuildLockBusy.increment();
+    }
+
+    public void dbFallbackAccepted() {
+        dbFallbackAccepted.increment();
+    }
+
+    public void dbFallbackRejected() {
+        dbFallbackRejected.increment();
+    }
+
+    public void nullMarkerHit() {
+        nullMarkerHit.increment();
+    }
 }

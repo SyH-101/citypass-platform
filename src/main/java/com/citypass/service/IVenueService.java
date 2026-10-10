@@ -15,7 +15,9 @@ public interface IVenueService extends IService<Venue> {
 
     Result queryById(Long id);
 
-    /** 压测基线：Redis → MySQL。 */
+    /**
+     * 压测基线：Redis → MySQL。
+     */
     Result queryByIdRedisBaseline(Long id);
 
     Result update(Venue venue);

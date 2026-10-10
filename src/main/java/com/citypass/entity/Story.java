@@ -7,13 +7,12 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.experimental.Accessors;
-
 import java.io.Serializable;
 import java.time.LocalDateTime;
 
 /**
  * <p>
- * 
+ *
  * </p>
  *
  * @since 2021-12-22
@@ -31,33 +30,38 @@ public class Story implements Serializable {
      */
     @TableId(value = "id", type = IdType.AUTO)
     private Long id;
+
     /**
      * 商户id
      */
     private Long venueId;
+
     /**
      * 用户id
      */
     private Long userId;
-
     private Long activityPassId;
     private String status;
     private Long version;
     private LocalDateTime publishTime;
     private LocalDateTime draftExpiresAt;
     private String clientKey;
+
     @TableField(exist = false)
-    private java.util.List<java.util.Map<String,Object>> attachments;
+    private java.util.List<java.util.Map<String, Object>> attachments;
+
     /**
      * 用户图标
      */
     @TableField(exist = false)
     private String icon;
+
     /**
      * 用户姓名
      */
     @TableField(exist = false)
     private String name;
+
     /**
      * 是否点赞过了
      */

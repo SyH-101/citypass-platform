@@ -7,13 +7,12 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.experimental.Accessors;
-
 import java.io.Serializable;
 import java.time.LocalDateTime;
 
 /**
  * <p>
- * 
+ *
  * </p>
  *
  * @since 2021-12-22
@@ -52,18 +51,25 @@ public class ActivityPass implements Serializable {
      */
     private String rules;
 
-    /** 活动介绍，不复用票券使用规则。 */
+    /**
+     * 活动介绍，不复用票券使用规则。
+     */
     private String description;
 
-    /** 活动分类，如 EXHIBITION / SPORT / FAMILY；不复用普通/限量票券 type。 */
+    /**
+     * 活动分类，如 EXHIBITION / SPORT / FAMILY；不复用普通/限量票券 type。
+     */
     private String activityCategory;
 
-    /** 逗号分隔的活动标签。 */
+    /**
+     * 逗号分隔的活动标签。
+     */
     private String tags;
 
-    /** 活动实际举办时间，与限量预约开放窗口 beginTime/endTime 分离。 */
+    /**
+     * 活动实际举办时间，与限量预约开放窗口 beginTime/endTime 分离。
+     */
     private LocalDateTime eventStartTime;
-
     private LocalDateTime eventEndTime;
 
     /**
@@ -85,6 +91,7 @@ public class ActivityPass implements Serializable {
      * 通行证类型
      */
     private Integer status;
+
     /**
      * 库存
      */
@@ -108,11 +115,8 @@ public class ActivityPass implements Serializable {
      */
     private LocalDateTime createTime;
 
-
     /**
      * 更新时间
      */
     private LocalDateTime updateTime;
-
-
 }

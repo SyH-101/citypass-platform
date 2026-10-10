@@ -1,19 +1,16 @@
 package com.citypass.controller;
 
-
 import com.citypass.dto.Result;
 import com.citypass.entity.ActivityPass;
 import com.citypass.dto.ActivityMetadataRequest;
 import com.citypass.service.IActivityPassService;
 import org.springframework.web.bind.annotation.*;
-
 import javax.annotation.Resource;
 
 /**
  * <p>
  *  前端控制器
  * </p>
- *
  */
 @RestController
 @RequestMapping("/passes")
@@ -40,19 +37,20 @@ public class PassController {
         return Result.ok(pass.getId());
     }
 
-
     /**
      * 查询场馆的通行证列表。
      */
     @GetMapping("/venue/{venueId}")
     public Result queryActivityPassOfVenue(@PathVariable("venueId") Long venueId) {
-       return passService.queryActivityPassOfVenue(venueId);
+        return passService.queryActivityPassOfVenue(venueId);
     }
 
-    /** Only activity metadata can change here; inventory, price and reservation windows are untouched. */
+    /**
+     * Only activity metadata can change here; inventory, price and reservation windows are untouched.
+     */
     @PutMapping("/{id}/metadata")
-    public Result updateMetadata(@PathVariable Long id,
-                                       @RequestBody ActivityMetadataRequest request) {
+    public Result updateMetadata(
+            @PathVariable Long id, @RequestBody ActivityMetadataRequest request) {
         return passService.updateMetadata(id, request);
     }
 

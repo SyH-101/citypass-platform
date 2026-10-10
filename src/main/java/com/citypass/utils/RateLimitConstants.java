@@ -5,9 +5,10 @@ package com.citypass.utils;
  */
 public class RateLimitConstants {
 
-    private RateLimitConstants() {
-    }
+    private RateLimitConstants() {}
 
-    /** 业务滑动窗口：rate:sw:reservation:{userId} */
+    /**
+     * 业务滑动窗口：rate:sw:reservation:{userId}
+     */
     public static final String SLIDING_WINDOW_RESERVATION_KEY = "rate:sw:reservation:";
 }

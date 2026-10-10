@@ -1,17 +1,14 @@
 package com.citypass.controller;
 
-
 import com.citypass.dto.Result;
 import com.citypass.service.ISubscriptionService;
 import org.springframework.web.bind.annotation.*;
-
 import javax.annotation.Resource;
 
 /**
  * <p>
  * 前端控制器
  * </p>
- *
  */
 @RestController
 @RequestMapping("/subscriptions")
@@ -36,7 +33,7 @@ public class SubscriptionController {
     }
 
     @GetMapping("/common/{userId}")
-    public Result commonSubscriptions(@PathVariable Long userId){
+    public Result commonSubscriptions(@PathVariable Long userId) {
         return subscriptionService.commonSubscriptions(userId);
     }
 }

@@ -9,7 +9,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.Mockito.mock;
@@ -27,10 +26,8 @@ class VenueControllerTest {
         controller.venueService = service;
         Venue venue = new Venue().setId(1L).setName("CityPass Venue").setCacheVersion(5L);
         when(service.queryById(1L)).thenReturn(Result.ok(venue));
-
         MockHttpServletResponse response = new MockHttpServletResponse();
         Result result = controller.queryVenueById(1L, response);
-
         assertEquals(Boolean.TRUE, result.getSuccess());
         assertEquals("5", response.getHeader("X-Venue-Cache-Version"));
         assertEquals("1", response.getHeader("X-Gateway-Cacheable"));
@@ -42,10 +39,8 @@ class VenueControllerTest {
         VenueController controller = new VenueController();
         controller.venueService = service;
         when(service.queryById(404L)).thenReturn(Result.fail("场馆不存在！"));
-
         MockHttpServletResponse response = new MockHttpServletResponse();
         controller.queryVenueById(404L, response);
-
         assertNull(response.getHeader("X-Venue-Cache-Version"));
         assertNull(response.getHeader("X-Gateway-Cacheable"));
     }
@@ -56,10 +51,10 @@ class VenueControllerTest {
         VenueController controller = new VenueController();
         controller.venueService = service;
         when(service.queryById(9L)).thenThrow(new CacheDegradedException("缓存服务暂时不可用，请稍后重试"));
-        MockMvc mvc = MockMvcBuilders.standaloneSetup(controller)
-                .setControllerAdvice(new WebExceptionAdvice())
-                .build();
-
+        MockMvc mvc =
+                MockMvcBuilders.standaloneSetup(controller)
+                        .setControllerAdvice(new WebExceptionAdvice())
+                        .build();
         mvc.perform(get("/venues/9"))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.success").value(false));

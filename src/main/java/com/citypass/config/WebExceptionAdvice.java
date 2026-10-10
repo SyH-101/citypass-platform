@@ -14,30 +14,32 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 public class WebExceptionAdvice {
 
     @ExceptionHandler(com.citypass.story.StoryProblem.class)
-    public org.springframework.http.ResponseEntity<Result> handleStoryProblem(com.citypass.story.StoryProblem e) {
-        return org.springframework.http.ResponseEntity.status(e.getStatus()).body(Result.fail(e.getMessage()));
+    public org.springframework.http.ResponseEntity<Result> handleStoryProblem(
+            com.citypass.story.StoryProblem exception) {
+        return org.springframework.http.ResponseEntity.status(exception.getStatus())
+                .body(Result.fail(exception.getMessage()));
     }
 
     @ExceptionHandler(CacheDegradedException.class)
     @ResponseStatus(HttpStatus.SERVICE_UNAVAILABLE)
-    public Result handleCacheDegraded(CacheDegradedException e) {
-        log.warn(e.getMessage());
-        return Result.fail(e.getMessage());
+    public Result handleCacheDegraded(CacheDegradedException exception) {
+        log.warn(exception.getMessage());
+        return Result.fail(exception.getMessage());
     }
 
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
-    public Result handleTypeMismatch(MethodArgumentTypeMismatchException e) {
-        return Result.fail("请求参数格式错误: " + e.getName());
+    public Result handleTypeMismatch(MethodArgumentTypeMismatchException exception) {
+        return Result.fail("请求参数格式错误: " + exception.getName());
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
-    public Result handleIllegalArgumentException(IllegalArgumentException e) {
-        return Result.fail(e.getMessage());
+    public Result handleIllegalArgumentException(IllegalArgumentException exception) {
+        return Result.fail(exception.getMessage());
     }
 
     @ExceptionHandler(RuntimeException.class)
-    public Result handleRuntimeException(RuntimeException e) {
-        log.error(e.toString(), e);
+    public Result handleRuntimeException(RuntimeException exception) {
+        log.error(exception.toString(), exception);
         return Result.fail("服务器异常");
     }
 }

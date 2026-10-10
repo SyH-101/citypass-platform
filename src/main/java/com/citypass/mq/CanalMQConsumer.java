@@ -13,7 +13,6 @@ import org.apache.rocketmq.common.message.MessageExt;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
-
 import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
 import javax.annotation.Resource;
@@ -21,7 +20,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Consumer;
-
 import static com.citypass.utils.RedisConstants.CACHE_VENUE_KEY;
 
 /**
@@ -42,28 +40,30 @@ public class CanalMQConsumer {
     private VenueCacheInvalidator venueCacheInvalidator;
 
     private DefaultMQPushConsumer consumer;
-
     private final Map<String, Consumer<JSONObject>> tableHandlers = new HashMap<>();
 
     @PostConstruct
     public void init() throws Exception {
         tableHandlers.put("tb_venue", this::evictVenue);
-
         consumer = new DefaultMQPushConsumer("canal-cache-consumer-group");
         consumer.setNamesrvAddr(nameServer);
         consumer.setConsumeFromWhere(ConsumeFromWhere.CONSUME_FROM_FIRST_OFFSET);
         consumer.subscribe(CANAL_TOPIC, "*");
-        consumer.registerMessageListener((MessageListenerConcurrently) (msgs, context) -> {
-            for (MessageExt msg : msgs) {
-                try {
-                    handleBinlogEvent(new String(msg.getBody(), StandardCharsets.UTF_8));
-                } catch (Exception e) {
-                    log.error("binlog 事件处理失败, msgId={}", msg.getMsgId(), e);
-                    return ConsumeConcurrentlyStatus.RECONSUME_LATER;
-                }
-            }
-            return ConsumeConcurrentlyStatus.CONSUME_SUCCESS;
-        });
+        consumer.registerMessageListener(
+                (MessageListenerConcurrently)
+                        (msgs, context) -> {
+                            for (MessageExt msg : msgs) {
+                                try {
+                                    handleBinlogEvent(
+                                            new String(msg.getBody(), StandardCharsets.UTF_8));
+                                } catch (Exception e) {
+                                    log.error("binlog 事件处理失败, msgId={}", msg.getMsgId(), e);
+                                    return ConsumeConcurrentlyStatus.RECONSUME_LATER;
+                                }
+                            }
+
+                            return ConsumeConcurrentlyStatus.CONSUME_SUCCESS;
+                        });
         consumer.start();
         log.info("Canal 缓存驱逐消费者启动成功，监听 topic={}", CANAL_TOPIC);
     }
@@ -75,10 +75,12 @@ public class CanalMQConsumer {
         if (handler == null) {
             return;
         }
+
         JSONArray data = flat.getJSONArray("data");
         if (data == null || data.isEmpty()) {
             return;
         }
+
         for (Object row : data) {
             handler.accept((JSONObject) row);
         }
@@ -89,6 +91,7 @@ public class CanalMQConsumer {
         if (id == null) {
             return;
         }
+
         venueCacheInvalidator.evict(id, row.getLong("cache_version"));
         log.info("[Canal] tb_venue 变更，已驱逐缓存 cache:venue:{}", id);
     }

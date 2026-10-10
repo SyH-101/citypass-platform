@@ -5,7 +5,6 @@ import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
-
 import javax.annotation.Resource;
 import java.util.Collections;
 import java.util.UUID;
@@ -38,14 +37,15 @@ public class SlidingWindowRateLimiter {
         if (windowMs <= 0 || maxRequests <= 0) {
             throw new IllegalArgumentException("windowMs 和 maxRequests 必须大于 0");
         }
+
         String member = UUID.randomUUID().toString();
-        Long r = stringRedisTemplate.execute(
-                SCRIPT,
-                Collections.singletonList(key),
-                String.valueOf(windowMs),
-                String.valueOf(maxRequests),
-                member
-        );
+        Long r =
+                stringRedisTemplate.execute(
+                        SCRIPT,
+                        Collections.singletonList(key),
+                        String.valueOf(windowMs),
+                        String.valueOf(maxRequests),
+                        member);
         return r != null && r == 1L;
     }
 }

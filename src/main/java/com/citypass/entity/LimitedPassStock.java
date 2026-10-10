@@ -6,7 +6,6 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.experimental.Accessors;
-
 import java.io.Serializable;
 import java.time.LocalDateTime;
 
@@ -60,6 +59,4 @@ public class LimitedPassStock implements Serializable {
      * 更新时间
      */
     private LocalDateTime updateTime;
-
-
 }

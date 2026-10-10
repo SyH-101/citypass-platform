@@ -14,6 +14,7 @@ import org.apache.ibatis.annotations.Select;
  */
 public interface LimitedPassStockMapper extends BaseMapper<LimitedPassStock> {
 
-    @Select("SELECT * FROM tb_limited_pass_stock WHERE activity_pass_id=#{activityPassId} FOR UPDATE")
+    @Select(
+            "SELECT * FROM tb_limited_pass_stock WHERE activity_pass_id=#{activityPassId} FOR UPDATE")
     LimitedPassStock selectByIdForUpdate(@Param("activityPassId") Long activityPassId);
 }

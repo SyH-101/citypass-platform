@@ -7,13 +7,12 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.experimental.Accessors;
-
 import java.io.Serializable;
 import java.time.LocalDateTime;
 
 /**
  * <p>
- * 
+ *
  * </p>
  *
  * @since 2021-12-22
@@ -58,6 +57,4 @@ public class VenueCategory implements Serializable {
      */
     @JsonIgnore
     private LocalDateTime updateTime;
-
-
 }

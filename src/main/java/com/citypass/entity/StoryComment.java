@@ -12,7 +12,7 @@ import lombok.experimental.Accessors;
 
 /**
  * <p>
- * 
+ *
  * </p>
  *
  * @since 2021-12-22
@@ -66,11 +66,15 @@ public class StoryComment implements Serializable {
      */
     private Integer status;
 
-    /** 展示字段，不持久化。 */
+    /**
+     * 展示字段，不持久化。
+     */
     @TableField(exist = false)
     private String authorName;
 
-    /** 展示字段，不持久化。 */
+    /**
+     * 展示字段，不持久化。
+     */
     @TableField(exist = false)
     private String authorIcon;
 
@@ -83,6 +87,4 @@ public class StoryComment implements Serializable {
      * 更新时间
      */
     private LocalDateTime updateTime;
-
-
 }

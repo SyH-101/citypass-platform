@@ -10,6 +10,4 @@ import com.baomidou.mybatisplus.extension.service.IService;
  *
  * @since 2021-12-22
  */
-public interface IVenueCategoryService extends IService<VenueCategory> {
-
-}
+public interface IVenueCategoryService extends IService<VenueCategory> {}

@@ -3,7 +3,6 @@ package com.citypass.mapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.citypass.entity.ActivityPass;
 import org.apache.ibatis.annotations.Param;
-
 import java.util.List;
 
 /**

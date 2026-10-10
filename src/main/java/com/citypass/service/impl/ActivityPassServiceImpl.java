@@ -13,7 +13,6 @@ import com.citypass.service.IActivityPassService;
 import com.citypass.service.IVenueService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
 import javax.annotation.Resource;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -27,12 +26,15 @@ import java.util.Locale;
  * @since 2021-12-22
  */
 @Service
-public class ActivityPassServiceImpl extends ServiceImpl<ActivityPassMapper, ActivityPass> implements IActivityPassService {
+public class ActivityPassServiceImpl extends ServiceImpl<ActivityPassMapper, ActivityPass>
+        implements IActivityPassService {
 
     @Resource
     private ILimitedPassStockService limitedPassStockService;
+
     @Resource
     private ReliableTaskRepository reliableTaskRepository;
+
     @Resource
     private IVenueService venueService;
 
@@ -84,14 +86,26 @@ public class ActivityPassServiceImpl extends ServiceImpl<ActivityPassMapper, Act
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Result updateMetadata(Long id, ActivityMetadataRequest request) {
-        if (id == null) throw new IllegalArgumentException("活动 ID 不能为空");
+        if (id == null) {
+            throw new IllegalArgumentException("活动 ID 不能为空");
+        }
+
         validateMetadata(request, true);
-        ActivityPass patch = new ActivityPass().setId(id).setTitle(request.getTitle()).setSubTitle(request.getSubTitle())
-                .setDescription(request.getDescription()).setActivityCategory(request.getActivityCategory().trim().toUpperCase(Locale.ROOT))
-                .setTags(request.getTags()).setEventStartTime(request.getEventStartTime()).setEventEndTime(request.getEventEndTime());
+        ActivityPass patch =
+                new ActivityPass()
+                        .setId(id)
+                        .setTitle(request.getTitle())
+                        .setSubTitle(request.getSubTitle())
+                        .setDescription(request.getDescription())
+                        .setActivityCategory(
+                                request.getActivityCategory().trim().toUpperCase(Locale.ROOT))
+                        .setTags(request.getTags())
+                        .setEventStartTime(request.getEventStartTime())
+                        .setEventEndTime(request.getEventEndTime());
         if (!updateById(patch)) {
             return Result.fail("活动不存在");
         }
+
         return Result.ok();
     }
 
@@ -101,7 +115,14 @@ public class ActivityPassServiceImpl extends ServiceImpl<ActivityPassMapper, Act
         if (id == null || status == null || status != 1 && status != 2) {
             throw new IllegalArgumentException("活动状态只支持 1（上架）或 2（下架）");
         }
-        if (!lambdaUpdate().eq(ActivityPass::getId,id).set(ActivityPass::getStatus,status).update()) return Result.fail("活动不存在");
+
+        if (!lambdaUpdate()
+                .eq(ActivityPass::getId, id)
+                .set(ActivityPass::getStatus, status)
+                .update()) {
+            return Result.fail("活动不存在");
+        }
+
         return Result.ok();
     }
 
@@ -111,7 +132,9 @@ public class ActivityPassServiceImpl extends ServiceImpl<ActivityPassMapper, Act
         if (pass.getStock() == null || pass.getStock() <= 0) {
             throw new IllegalArgumentException("限量通行证库存必须大于 0");
         }
-        if (pass.getBeginTime() == null || pass.getEndTime() == null
+
+        if (pass.getBeginTime() == null
+                || pass.getEndTime() == null
                 || !pass.getEndTime().isAfter(pass.getBeginTime())
                 || !pass.getEndTime().isAfter(now)) {
             throw new IllegalArgumentException("预约时间窗无效");
@@ -119,20 +142,34 @@ public class ActivityPassServiceImpl extends ServiceImpl<ActivityPassMapper, Act
     }
 
     private void validateBase(ActivityPass pass) {
-        if (pass == null || pass.getVenueId() == null || pass.getTitle() == null
+        if (pass == null
+                || pass.getVenueId() == null
+                || pass.getTitle() == null
                 || pass.getTitle().trim().isEmpty()) {
             throw new IllegalArgumentException("场馆和通行证标题不能为空");
         }
+
         if (venueService.getById(pass.getVenueId()) == null) {
             throw new IllegalArgumentException("场馆不存在");
         }
-        if (pass.getPayValue() == null || pass.getPayValue() < 0
-                || pass.getActualValue() == null || pass.getActualValue() < 0) {
+
+        if (pass.getPayValue() == null
+                || pass.getPayValue() < 0
+                || pass.getActualValue() == null
+                || pass.getActualValue() < 0) {
             throw new IllegalArgumentException("金额不能为负数");
         }
-        boolean anySearchMetadata = pass.getEventStartTime() != null || pass.getEventEndTime() != null
-                || notBlank(pass.getActivityCategory()) || notBlank(pass.getDescription()) || notBlank(pass.getTags());
-        if (anySearchMetadata) validateMetadata(toMetadataRequest(pass), true);
+
+        boolean anySearchMetadata =
+                pass.getEventStartTime() != null
+                        || pass.getEventEndTime() != null
+                        || notBlank(pass.getActivityCategory())
+                        || notBlank(pass.getDescription())
+                        || notBlank(pass.getTags());
+        if (anySearchMetadata) {
+            validateMetadata(toMetadataRequest(pass), true);
+        }
+
         if (notBlank(pass.getActivityCategory())) {
             pass.setActivityCategory(pass.getActivityCategory().trim().toUpperCase(Locale.ROOT));
         }
@@ -151,18 +188,25 @@ public class ActivityPassServiceImpl extends ServiceImpl<ActivityPassMapper, Act
     }
 
     private void validateMetadata(ActivityMetadataRequest request, boolean requireComplete) {
-        if (request == null || !notBlank(request.getTitle()) || request.getTitle().trim().length() > 255) {
+        if (request == null
+                || !notBlank(request.getTitle())
+                || request.getTitle().trim().length() > 255) {
             throw new IllegalArgumentException("活动标题不能为空且不能超过 255 个字符");
         }
-        if (!notBlank(request.getActivityCategory()) || request.getActivityCategory().trim().length() > 32) {
+
+        if (!notBlank(request.getActivityCategory())
+                || request.getActivityCategory().trim().length() > 32) {
             throw new IllegalArgumentException("活动分类不能为空且不能超过 32 个字符");
         }
+
         if (request.getDescription() != null && request.getDescription().length() > 2000
                 || request.getTags() != null && request.getTags().length() > 255
                 || request.getSubTitle() != null && request.getSubTitle().length() > 255) {
             throw new IllegalArgumentException("活动文本字段超过长度限制");
         }
-        if (request.getEventStartTime() == null || request.getEventEndTime() == null
+
+        if (request.getEventStartTime() == null
+                || request.getEventEndTime() == null
                 || !request.getEventEndTime().isAfter(request.getEventStartTime())) {
             throw new IllegalArgumentException("活动实际举办时间无效");
         }

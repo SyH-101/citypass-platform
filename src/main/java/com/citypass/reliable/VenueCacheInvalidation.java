@@ -8,6 +8,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class VenueCacheInvalidation {
+
     private Long venueId;
     private Long cacheVersion;
 }

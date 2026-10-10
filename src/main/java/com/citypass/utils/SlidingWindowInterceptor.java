@@ -6,7 +6,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
-
 import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
@@ -32,19 +31,24 @@ public class SlidingWindowInterceptor implements HandlerInterceptor {
     private int maxRequests;
 
     @Override
-    public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler)
+    public boolean preHandle(
+            HttpServletRequest request, HttpServletResponse response, Object handler)
             throws Exception {
         if (!enabled) {
             return true;
         }
+
         if (UserHolder.getUser() == null) {
-            return true; // 交给登录拦截器处理
+            // 交给登录拦截器处理
+            return true;
         }
+
         Long userId = UserHolder.getUser().getId();
         String key = RateLimitConstants.SLIDING_WINDOW_RESERVATION_KEY + userId;
         if (slidingWindowRateLimiter.tryAcquire(key, windowMs, maxRequests)) {
             return true;
         }
+
         log.warn("滑动窗口限流触发, userId={}, uri={}", userId, request.getRequestURI());
         response.setStatus(429);
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());

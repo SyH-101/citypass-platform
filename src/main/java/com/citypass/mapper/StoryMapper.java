@@ -10,5 +10,4 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
  *
  * @since 2021-12-22
  */
-public interface StoryMapper extends BaseMapper<Story> {
-}
+public interface StoryMapper extends BaseMapper<Story> {}

@@ -14,6 +14,5 @@ import org.springframework.stereotype.Service;
  * @since 2021-12-22
  */
 @Service
-public class VenueCategoryServiceImpl extends ServiceImpl<VenueCategoryMapper, VenueCategory> implements IVenueCategoryService {
-
-}
+public class VenueCategoryServiceImpl extends ServiceImpl<VenueCategoryMapper, VenueCategory>
+        implements IVenueCategoryService {}

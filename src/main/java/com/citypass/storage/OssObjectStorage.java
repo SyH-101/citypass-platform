@@ -6,7 +6,6 @@ import com.aliyun.oss.common.comm.SignVersion;
 import com.aliyun.oss.model.GeneratePresignedUrlRequest;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
-
 import javax.annotation.PreDestroy;
 import java.io.InputStream;
 import java.util.Date;
@@ -14,37 +13,82 @@ import java.util.Date;
 @Component
 @ConditionalOnProperty(name = "object-storage.provider", havingValue = "oss")
 public class OssObjectStorage implements ObjectStorage {
-    private final OSS internal;
-    private final OSS signer;
+
+    private final OSS internalClient;
+    private final OSS signingClient;
     private final String bucket;
 
-    public OssObjectStorage(StorageProperties p) {
-        if (p.getAccessKey() == null || p.getAccessKey().trim().isEmpty()
-                || p.getSecretKey() == null || p.getSecretKey().trim().isEmpty()) {
+    public OssObjectStorage(StorageProperties storageProperties) {
+        if (storageProperties.getAccessKey() == null
+                || storageProperties.getAccessKey().trim().isEmpty()
+                || storageProperties.getSecretKey() == null
+                || storageProperties.getSecretKey().trim().isEmpty()) {
             throw new IllegalArgumentException("OSS credentials must be provided via environment");
         }
-        ClientBuilderConfiguration c = new ClientBuilderConfiguration();
-        c.setConnectionTimeout(p.getTimeoutSeconds() * 1000);
-        c.setSocketTimeout(p.getTimeoutSeconds() * 1000);
-        c.setConnectionRequestTimeout(p.getTimeoutSeconds() * 1000);
-        c.setMaxErrorRetry(0);
-        c.setSignatureVersion(SignVersion.V4);
-        internal = OSSClientBuilder.create().endpoint(p.getEndpoint()).region(p.getRegion())
-                .credentialsProvider(new DefaultCredentialProvider(p.getAccessKey(), p.getSecretKey())).clientConfiguration(c).build();
-        signer = OSSClientBuilder.create().endpoint(p.getPublicEndpoint()).region(p.getRegion())
-                .credentialsProvider(new DefaultCredentialProvider(p.getAccessKey(), p.getSecretKey())).clientConfiguration(c).build();
-        bucket = p.getBucket();
+
+        ClientBuilderConfiguration clientConfiguration = new ClientBuilderConfiguration();
+        clientConfiguration.setConnectionTimeout(storageProperties.getTimeoutSeconds() * 1000);
+        clientConfiguration.setSocketTimeout(storageProperties.getTimeoutSeconds() * 1000);
+        clientConfiguration.setConnectionRequestTimeout(
+                storageProperties.getTimeoutSeconds() * 1000);
+        clientConfiguration.setMaxErrorRetry(0);
+        clientConfiguration.setSignatureVersion(SignVersion.V4);
+        internalClient =
+                OSSClientBuilder.create()
+                        .endpoint(storageProperties.getEndpoint())
+                        .region(storageProperties.getRegion())
+                        .credentialsProvider(
+                                new DefaultCredentialProvider(
+                                        storageProperties.getAccessKey(),
+                                        storageProperties.getSecretKey()))
+                        .clientConfiguration(clientConfiguration)
+                        .build();
+        signingClient =
+                OSSClientBuilder.create()
+                        .endpoint(storageProperties.getPublicEndpoint())
+                        .region(storageProperties.getRegion())
+                        .credentialsProvider(
+                                new DefaultCredentialProvider(
+                                        storageProperties.getAccessKey(),
+                                        storageProperties.getSecretKey()))
+                        .clientConfiguration(clientConfiguration)
+                        .build();
+        bucket = storageProperties.getBucket();
     }
-    public String signPut(String key, int seconds) { return sign(key, seconds, HttpMethod.PUT); }
-    public String signGet(String key, int seconds) { return sign(key, seconds, HttpMethod.GET); }
+
+    public String signPut(String key, int seconds) {
+        return sign(key, seconds, HttpMethod.PUT);
+    }
+
+    public String signGet(String key, int seconds) {
+        return sign(key, seconds, HttpMethod.GET);
+    }
+
     private String sign(String key, int seconds, HttpMethod method) {
         GeneratePresignedUrlRequest request = new GeneratePresignedUrlRequest(bucket, key, method);
         request.setExpiration(new Date(System.currentTimeMillis() + seconds * 1000L));
-        return signer.generatePresignedUrl(request).toString();
+        return signingClient.generatePresignedUrl(request).toString();
     }
-    public long size(String key) { return internal.getObjectMetadata(bucket, key).getContentLength(); }
-    public InputStream open(String key) { return internal.getObject(bucket, key).getObjectContent(); }
-    public void copy(String staging, String target) { internal.copyObject(bucket, staging, bucket, target); }
-    public void delete(String key) { internal.deleteObject(bucket, key); }
-    @PreDestroy public void close() { internal.shutdown(); signer.shutdown(); }
+
+    public long size(String key) {
+        return internalClient.getObjectMetadata(bucket, key).getContentLength();
+    }
+
+    public InputStream open(String key) {
+        return internalClient.getObject(bucket, key).getObjectContent();
+    }
+
+    public void copy(String staging, String target) {
+        internalClient.copyObject(bucket, staging, bucket, target);
+    }
+
+    public void delete(String key) {
+        internalClient.deleteObject(bucket, key);
+    }
+
+    @PreDestroy
+    public void close() {
+        internalClient.shutdown();
+        signingClient.shutdown();
+    }
 }

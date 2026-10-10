@@ -1,12 +1,14 @@
 package com.citypass.dto;
 
 import lombok.Data;
-
 import java.time.LocalDateTime;
 
-/** Activity activity fields. Inventory, price and reservation windows are intentionally absent. */
+/**
+ * Activity activity fields. Inventory, price and reservation windows are intentionally absent.
+ */
 @Data
 public class ActivityMetadataRequest {
+
     private String title;
     private String subTitle;
     private String description;

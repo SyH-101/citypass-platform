@@ -4,11 +4,14 @@ import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
-/** Limits are enforced on actual object bytes and decoded image dimensions. */
+/**
+ * Limits are enforced on actual object bytes and decoded image dimensions.
+ */
 @Data
 @Component
 @ConfigurationProperties(prefix = "story-files")
 public class StoryFileProperties {
+
     private long maxBytes = 10 * 1024 * 1024;
     private long maxPixels = 20000000;
     private int maxDimension = 10000;

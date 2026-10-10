@@ -1,6 +1,5 @@
 package com.citypass.controller;
 
-
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.citypass.dto.Result;
@@ -8,7 +7,6 @@ import com.citypass.entity.Venue;
 import com.citypass.service.IVenueService;
 import com.citypass.utils.SystemConstants;
 import org.springframework.web.bind.annotation.*;
-
 import javax.annotation.Resource;
 import javax.servlet.http.HttpServletResponse;
 
@@ -16,7 +14,6 @@ import javax.servlet.http.HttpServletResponse;
  * <p>
  * 前端控制器
  * </p>
- *
  */
 @RestController
 @RequestMapping("/venues")
@@ -40,6 +37,7 @@ public class VenueController {
                 response.setHeader("X-Gateway-Cacheable", "1");
             }
         }
+
         return result;
     }
 
@@ -60,6 +58,7 @@ public class VenueController {
         if (venue == null) {
             return Result.fail("场馆不存在！");
         }
+
         return Result.ok(venue);
     }
 
@@ -98,9 +97,8 @@ public class VenueController {
             @RequestParam("categoryId") Integer categoryId,
             @RequestParam(value = "current", defaultValue = "1") Integer current,
             @RequestParam(value = "x", required = false) Double x,
-            @RequestParam(value = "y", required = false) Double y
-    ) {
-       return venueService.queryVenueByType(categoryId, current, x, y);
+            @RequestParam(value = "y", required = false) Double y) {
+        return venueService.queryVenueByType(categoryId, current, x, y);
     }
 
     /**
@@ -112,12 +110,13 @@ public class VenueController {
     @GetMapping("/of/name")
     public Result queryVenueByName(
             @RequestParam(value = "name", required = false) String name,
-            @RequestParam(value = "current", defaultValue = "1") Integer current
-    ) {
+            @RequestParam(value = "current", defaultValue = "1") Integer current) {
         // 根据类型分页查询
-        Page<Venue> page = venueService.query()
-                .like(StrUtil.isNotBlank(name), "name", name)
-                .page(new Page<>(current, SystemConstants.MAX_PAGE_SIZE));
+        Page<Venue> page =
+                venueService
+                        .query()
+                        .like(StrUtil.isNotBlank(name), "name", name)
+                        .page(new Page<>(current, SystemConstants.MAX_PAGE_SIZE));
         // 返回数据
         return Result.ok(page.getRecords());
     }

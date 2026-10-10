@@ -13,7 +13,6 @@ import org.redisson.api.RedissonClient;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.data.redis.core.script.RedisScript;
-
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -28,7 +27,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
-
 import static com.citypass.utils.RedisConstants.CACHE_VENUE_KEY;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -55,14 +53,13 @@ class MultiLevelCacheServiceTest {
     void nullMarkerPreventsSecondDatabaseLookup() {
         Fixture fixture = fixture(2, 3, 20, 1);
         AtomicInteger dbCalls = new AtomicInteger();
-        Function<Long, Venue> missing = id -> {
-            dbCalls.incrementAndGet();
-            return null;
-        };
-
+        Function<Long, Venue> missing =
+                id -> {
+                    dbCalls.incrementAndGet();
+                    return null;
+                };
         assertEquals(null, fixture.query(999999L, missing));
         assertEquals(null, fixture.query(999999L, missing));
-
         assertEquals(1, dbCalls.get());
         assertEquals(1.0, fixture.registry.get("cache.null.marker.hit").counter().count());
     }
@@ -72,24 +69,29 @@ class MultiLevelCacheServiceTest {
         Fixture fixture = fixture(4, 3, 400, 10);
         AtomicInteger dbCalls = new AtomicInteger();
         CountDownLatch start = new CountDownLatch(1);
-        Function<Long, Venue> database = id -> {
-            dbCalls.incrementAndGet();
-            sleep(150);
-            return venue(id, 1L, "hot");
-        };
-
+        Function<Long, Venue> database =
+                id -> {
+                    dbCalls.incrementAndGet();
+                    sleep(150);
+                    return venue(id, 1L, "hot");
+                };
         ExecutorService callers = Executors.newFixedThreadPool(48);
         List<Future<Venue>> futures = new ArrayList<>();
         for (int i = 0; i < 200; i++) {
-            futures.add(callers.submit(() -> {
-                start.await();
-                return fixture.query(1L, database);
-            }));
+            futures.add(
+                    callers.submit(
+                            () -> {
+                                start.await();
+                                return fixture.query(1L, database);
+                            }));
         }
-        start.countDown();
-        for (Future<Venue> future : futures) assertEquals("hot", future.get(5, TimeUnit.SECONDS).getName());
-        callers.shutdownNow();
 
+        start.countDown();
+        for (Future<Venue> future : futures) {
+            assertEquals("hot", future.get(5, TimeUnit.SECONDS).getName());
+        }
+
+        callers.shutdownNow();
         assertEquals(1, dbCalls.get());
     }
 
@@ -98,22 +100,20 @@ class MultiLevelCacheServiceTest {
         Fixture fixture = fixture(1, 3, 260, 50);
         AtomicInteger dbCalls = new AtomicInteger();
         CountDownLatch firstEnteredDb = new CountDownLatch(1);
-        Function<Long, Venue> slowDatabase = id -> {
-            dbCalls.incrementAndGet();
-            firstEnteredDb.countDown();
-            sleep(10_200);
-            return venue(id, 2L, "slow");
-        };
-
+        Function<Long, Venue> slowDatabase =
+                id -> {
+                    dbCalls.incrementAndGet();
+                    firstEnteredDb.countDown();
+                    sleep(10_200);
+                    return venue(id, 2L, "slow");
+                };
         ExecutorService callers = Executors.newFixedThreadPool(2);
         Future<Venue> first = callers.submit(() -> fixture.query(2L, slowDatabase));
         assertTrue(firstEnteredDb.await(2, TimeUnit.SECONDS));
         Future<Venue> second = callers.submit(() -> fixture.query(2L, slowDatabase));
-
         assertEquals("slow", first.get(14, TimeUnit.SECONDS).getName());
         assertEquals("slow", second.get(14, TimeUnit.SECONDS).getName());
         callers.shutdownNow();
-
         assertEquals(1, dbCalls.get());
         verify(fixture.lock, never()).tryLock(anyLong(), anyLong(), any(TimeUnit.class));
     }
@@ -125,19 +125,19 @@ class MultiLevelCacheServiceTest {
         AtomicInteger dbCalls = new AtomicInteger();
         CountDownLatch accepted = new CountDownLatch(2);
         CountDownLatch release = new CountDownLatch(1);
-        Function<Long, Venue> database = id -> {
-            dbCalls.incrementAndGet();
-            accepted.countDown();
-            await(release);
-            return venue(id, 1L, "fallback");
-        };
-
-        List<Future<?>> futures = submitConcurrent(32, index -> fixture.query(10_000L + index, database));
+        Function<Long, Venue> database =
+                id -> {
+                    dbCalls.incrementAndGet();
+                    accepted.countDown();
+                    await(release);
+                    return venue(id, 1L, "fallback");
+                };
+        List<Future<?>> futures =
+                submitConcurrent(32, index -> fixture.query(10_000L + index, database));
         assertTrue(accepted.await(2, TimeUnit.SECONDS));
         sleep(200);
         release.countDown();
         int rejected = countDegradedFailures(futures);
-
         assertEquals(2, dbCalls.get());
         assertEquals(30, rejected);
         assertEquals(2.0, fixture.registry.get("cache.db.fallback.accepted").counter().count());
@@ -149,34 +149,42 @@ class MultiLevelCacheServiceTest {
         Fixture fixture = fixture(2, 1, 1, 0);
         fixture.store.put(CACHE_VENUE_KEY + 1L, redisData(venue(1L, 1L, "warm"), false));
         AtomicInteger warmDbCalls = new AtomicInteger();
-        assertEquals("warm", fixture.query(1L, id -> {
-            warmDbCalls.incrementAndGet();
-            return null;
-        }).getName());
-
+        assertEquals(
+                "warm",
+                fixture.query(
+                                1L,
+                                id -> {
+                                    warmDbCalls.incrementAndGet();
+                                    return null;
+                                })
+                        .getName());
         fixture.redisDown.set(true);
-        assertEquals("warm", fixture.query(1L, id -> {
-            warmDbCalls.incrementAndGet();
-            return null;
-        }).getName());
+        assertEquals(
+                "warm",
+                fixture.query(
+                                1L,
+                                id -> {
+                                    warmDbCalls.incrementAndGet();
+                                    return null;
+                                })
+                        .getName());
         assertEquals(0, warmDbCalls.get());
-
         AtomicInteger degradedDbCalls = new AtomicInteger();
         CountDownLatch accepted = new CountDownLatch(2);
         CountDownLatch release = new CountDownLatch(1);
-        Function<Long, Venue> database = id -> {
-            degradedDbCalls.incrementAndGet();
-            accepted.countDown();
-            await(release);
-            return venue(id, 1L, "degraded");
-        };
-        List<Future<?>> futures = submitConcurrent(32,
-                index -> fixture.query(20_000L + index, database));
+        Function<Long, Venue> database =
+                id -> {
+                    degradedDbCalls.incrementAndGet();
+                    accepted.countDown();
+                    await(release);
+                    return venue(id, 1L, "degraded");
+                };
+        List<Future<?>> futures =
+                submitConcurrent(32, index -> fixture.query(20_000L + index, database));
         assertTrue(accepted.await(2, TimeUnit.SECONDS));
         sleep(200);
         release.countDown();
         int rejected = countDegradedFailures(futures);
-
         assertEquals(2, degradedDbCalls.get());
         assertEquals(30, rejected);
     }
@@ -186,20 +194,25 @@ class MultiLevelCacheServiceTest {
         Fixture fixture = fixture(1, 1, 1, 0);
         AtomicInteger dbCalls = new AtomicInteger();
         fixture.redisDown.set(true);
-        assertEquals(null, fixture.query(77L, id -> {
-            dbCalls.incrementAndGet();
-            return null;
-        }));
+        assertEquals(
+                null,
+                fixture.query(
+                        77L,
+                        id -> {
+                            dbCalls.incrementAndGet();
+                            return null;
+                        }));
         assertEquals("OPEN", fixture.gate.stateName());
-
         fixture.redisDown.set(false);
         fixture.store.put(CACHE_VENUE_KEY + 77L, redisData(venue(77L, 3L, "recovered"), false));
         sleep(80);
-        Venue recovered = fixture.query(77L, id -> {
-            dbCalls.incrementAndGet();
-            return null;
-        });
-
+        Venue recovered =
+                fixture.query(
+                        77L,
+                        id -> {
+                            dbCalls.incrementAndGet();
+                            return null;
+                        });
         assertEquals("recovered", recovered.getName());
         assertEquals(1, dbCalls.get());
         assertEquals("CLOSED", fixture.gate.stateName());
@@ -212,26 +225,34 @@ class MultiLevelCacheServiceTest {
         AtomicInteger dbCalls = new AtomicInteger();
         CountDownLatch rebuildStarted = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
-        Function<Long, Venue> database = id -> {
-            dbCalls.incrementAndGet();
-            rebuildStarted.countDown();
-            await(release);
-            return venue(id, 2L, "fresh");
-        };
-
-        List<Future<?>> futures = submitConcurrent(100, index -> {
-            Venue result = fixture.query(88L, database);
-            assertEquals("stale", result.getName());
-            return result;
-        });
+        Function<Long, Venue> database =
+                id -> {
+                    dbCalls.incrementAndGet();
+                    rebuildStarted.countDown();
+                    await(release);
+                    return venue(id, 2L, "fresh");
+                };
+        List<Future<?>> futures =
+                submitConcurrent(
+                        100,
+                        index -> {
+                            Venue result = fixture.query(88L, database);
+                            assertEquals("stale", result.getName());
+                            return result;
+                        });
         assertTrue(rebuildStarted.await(2, TimeUnit.SECONDS));
-        for (Future<?> future : futures) future.get(2, TimeUnit.SECONDS);
+        for (Future<?> future : futures) {
+            future.get(2, TimeUnit.SECONDS);
+        }
+
         assertEquals(1, dbCalls.get());
         release.countDown();
-
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
         while (fixture.registry.get("cache.rebuild.started").counter().count() < 1.0
-                && System.nanoTime() < deadline) sleep(10);
+                && System.nanoTime() < deadline) {
+            sleep(10);
+        }
+
         assertEquals(1.0, fixture.registry.get("cache.rebuild.started").counter().count());
     }
 
@@ -247,11 +268,14 @@ class MultiLevelCacheServiceTest {
         List<Future<?>> futures = new ArrayList<>();
         for (int i = 0; i < count; i++) {
             final int index = i;
-            futures.add(callers.submit(() -> {
-                start.await();
-                return task.apply(index);
-            }));
+            futures.add(
+                    callers.submit(
+                            () -> {
+                                start.await();
+                                return task.apply(index);
+                            }));
         }
+
         start.countDown();
         callers.shutdown();
         return futures;
@@ -263,10 +287,14 @@ class MultiLevelCacheServiceTest {
             try {
                 future.get(3, TimeUnit.SECONDS);
             } catch (java.util.concurrent.ExecutionException e) {
-                if (e.getCause() instanceof CacheDegradedException) rejected++;
-                else throw e;
+                if (e.getCause() instanceof CacheDegradedException) {
+                    rejected++;
+                } else {
+                    throw e;
+                }
             }
         }
+
         return rejected;
     }
 
@@ -278,9 +306,8 @@ class MultiLevelCacheServiceTest {
         RedisData data = new RedisData();
         data.setData(venue);
         data.setVersion(venue.getCacheVersion());
-        data.setExpireTime(expired
-                ? LocalDateTime.now().minusSeconds(1)
-                : LocalDateTime.now().plusMinutes(5));
+        data.setExpireTime(
+                expired ? LocalDateTime.now().minusSeconds(1) : LocalDateTime.now().plusMinutes(5));
         return JSONUtil.toJsonStr(data);
     }
 
@@ -295,7 +322,9 @@ class MultiLevelCacheServiceTest {
 
     private static void await(CountDownLatch latch) {
         try {
-            if (!latch.await(5, TimeUnit.SECONDS)) throw new AssertionError("latch timed out");
+            if (!latch.await(5, TimeUnit.SECONDS)) {
+                throw new AssertionError("latch timed out");
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new AssertionError(e);
@@ -304,11 +333,13 @@ class MultiLevelCacheServiceTest {
 
     @FunctionalInterface
     private interface ThrowingFunction<T> {
+
         Object apply(T value) throws Exception;
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
     private static class Fixture implements AutoCloseable {
+
         private final Map<String, String> store = new ConcurrentHashMap<>();
         private final AtomicBoolean redisDown = new AtomicBoolean();
         private final AtomicBoolean forceLockBusy = new AtomicBoolean();
@@ -317,7 +348,8 @@ class MultiLevelCacheServiceTest {
         private final ValueOperations<String, String> values = mock(ValueOperations.class);
         private final RedissonClient redisson = mock(RedissonClient.class);
         private final RLock lock = mock(RLock.class);
-        private final Cache<String, Object> caffeine = Caffeine.newBuilder().maximumSize(1000).build();
+        private final Cache<String, Object> caffeine =
+                Caffeine.newBuilder().maximumSize(1000).build();
         private final SimpleMeterRegistry registry = new SimpleMeterRegistry();
         private final ExecutorService rebuildExecutor = Executors.newFixedThreadPool(4);
         private final RedisFailureGate gate;
@@ -333,36 +365,46 @@ class MultiLevelCacheServiceTest {
             properties.setLockWaitMaxDelayMs(waitDelayMs);
             gate = new RedisFailureGate(properties);
             CacheReliabilityMetrics metrics = new CacheReliabilityMetrics(registry, gate);
-
             when(redis.opsForValue()).thenReturn(values);
-            when(values.get(anyString())).thenAnswer(invocation -> {
-                failIfRedisDown();
-                return store.get(invocation.getArgument(0));
-            });
-            doAnswer(invocation -> {
-                failIfRedisDown();
-                store.put(invocation.getArgument(0), invocation.getArgument(1));
-                return null;
-            }).when(values).set(anyString(), anyString(), anyLong(), any(TimeUnit.class));
-            doAnswer(invocation -> {
-                failIfRedisDown();
-                List<String> keys = invocation.getArgument(1);
-                String json = invocation.getArgument(3);
-                store.put(keys.get(0), json);
-                return 1L;
-            }).when(redis).execute(any(RedisScript.class), anyList(), any(), any(), any());
-
+            when(values.get(anyString()))
+                    .thenAnswer(
+                            invocation -> {
+                                failIfRedisDown();
+                                return store.get(invocation.getArgument(0));
+                            });
+            doAnswer(
+                            invocation -> {
+                                failIfRedisDown();
+                                store.put(invocation.getArgument(0), invocation.getArgument(1));
+                                return null;
+                            })
+                    .when(values)
+                    .set(anyString(), anyString(), anyLong(), any(TimeUnit.class));
+            doAnswer(
+                            invocation -> {
+                                failIfRedisDown();
+                                List<String> keys = invocation.getArgument(1);
+                                String json = invocation.getArgument(3);
+                                store.put(keys.get(0), json);
+                                return 1L;
+                            })
+                    .when(redis)
+                    .execute(any(RedisScript.class), anyList(), any(), any(), any());
             when(redisson.getLock(anyString())).thenReturn(lock);
-            when(lock.tryLock()).thenAnswer(invocation ->
-                    !forceLockBusy.get() && backendLock.tryLock());
-            when(lock.isHeldByCurrentThread()).thenAnswer(invocation -> backendLock.isHeldByCurrentThread());
-            doAnswer(invocation -> {
-                backendLock.unlock();
-                return null;
-            }).when(lock).unlock();
-
-            service = new MultiLevelCacheService(redis, caffeine, redisson, properties,
-                    gate, metrics, rebuildExecutor);
+            when(lock.tryLock())
+                    .thenAnswer(invocation -> !forceLockBusy.get() && backendLock.tryLock());
+            when(lock.isHeldByCurrentThread())
+                    .thenAnswer(invocation -> backendLock.isHeldByCurrentThread());
+            doAnswer(
+                            invocation -> {
+                                backendLock.unlock();
+                                return null;
+                            })
+                    .when(lock)
+                    .unlock();
+            service =
+                    new MultiLevelCacheService(
+                            redis, caffeine, redisson, properties, gate, metrics, rebuildExecutor);
         }
 
         private Venue query(Long id, Function<Long, Venue> database) {
@@ -371,7 +413,9 @@ class MultiLevelCacheServiceTest {
         }
 
         private void failIfRedisDown() {
-            if (redisDown.get()) throw new IllegalStateException("Redis unavailable");
+            if (redisDown.get()) {
+                throw new IllegalStateException("Redis unavailable");
+            }
         }
 
         @Override

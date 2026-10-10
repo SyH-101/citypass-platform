@@ -4,12 +4,13 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
-
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Transactional outbox repository with task-level leases and fencing versions. */
+/**
+ * Transactional outbox repository with task-level leases and fencing versions.
+ */
 @Repository
 public class ReliableTaskRepository {
 
@@ -22,7 +23,11 @@ public class ReliableTaskRepository {
     public static final String STORY_FEED = "STORY_FEED";
     public static final String DELETE_STORY_FILE = "DELETE_STORY_FILE";
 
-    public enum FailureDisposition { RETRY, DEAD, LOST_LEASE }
+    public enum FailureDisposition {
+        RETRY,
+        DEAD,
+        LOST_LEASE
+    }
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -39,10 +44,14 @@ public class ReliableTaskRepository {
 
     public void enqueueAt(String taskType, String bizKey, String payload, LocalDateTime executeAt) {
         jdbcTemplate.update(
-                "INSERT IGNORE INTO tb_reliable_task" +
-                        "(task_type,biz_key,payload,status,retry_count,max_retry,next_retry_time,version) " +
-                        "VALUES (?,?,?,'PENDING',0,?,?,0)",
-                taskType, bizKey, payload, Math.max(1, defaultMaxRetry), executeAt);
+                "INSERT IGNORE INTO tb_reliable_task"
+                        + "(task_type,biz_key,payload,status,retry_count,max_retry,next_retry_time,version) "
+                        + "VALUES (?,?,?,'PENDING',0,?,?,0)",
+                taskType,
+                bizKey,
+                payload,
+                Math.max(1, defaultMaxRetry),
+                executeAt);
     }
 
     /**
@@ -51,30 +60,34 @@ public class ReliableTaskRepository {
      */
     @Transactional(rollbackFor = Exception.class)
     public List<ReliableTask> claimReady(int limit, String owner, int leaseSeconds) {
-        List<ReliableTask> candidates = jdbcTemplate.query(
-                "SELECT id,task_type,payload,retry_count,max_retry,version FROM tb_reliable_task " +
-                        "WHERE ((status='PENDING' AND next_retry_time<=NOW()) " +
-                        "OR (status='RUNNING' AND lease_until<=NOW())) " +
-                        "ORDER BY id LIMIT ? FOR UPDATE SKIP LOCKED",
-                new Object[]{limit},
-                (rs, rowNum) -> {
-                    ReliableTask task = new ReliableTask();
-                    task.setId(rs.getLong("id"));
-                    task.setTaskType(rs.getString("task_type"));
-                    task.setPayload(rs.getString("payload"));
-                    task.setRetryCount(rs.getInt("retry_count"));
-                    task.setMaxRetry(rs.getInt("max_retry"));
-                    task.setVersion(rs.getLong("version"));
-                    return task;
-                });
-
+        List<ReliableTask> candidates =
+                jdbcTemplate.query(
+                        "SELECT id,task_type,payload,retry_count,max_retry,version FROM tb_reliable_task "
+                                + "WHERE ((status='PENDING' AND next_retry_time<=NOW()) "
+                                + "OR (status='RUNNING' AND lease_until<=NOW())) "
+                                + "ORDER BY id LIMIT ? FOR UPDATE SKIP LOCKED",
+                        new Object[] {limit},
+                        (rs, rowNum) -> {
+                            ReliableTask task = new ReliableTask();
+                            task.setId(rs.getLong("id"));
+                            task.setTaskType(rs.getString("task_type"));
+                            task.setPayload(rs.getString("payload"));
+                            task.setRetryCount(rs.getInt("retry_count"));
+                            task.setMaxRetry(rs.getInt("max_retry"));
+                            task.setVersion(rs.getLong("version"));
+                            return task;
+                        });
         LocalDateTime leaseUntil = LocalDateTime.now().plusSeconds(Math.max(1, leaseSeconds));
         List<ReliableTask> claimed = new ArrayList<>(candidates.size());
         for (ReliableTask task : candidates) {
-            int changed = jdbcTemplate.update(
-                    "UPDATE tb_reliable_task SET status='RUNNING',locked_by=?,lease_until=?," +
-                            "version=version+1,update_time=NOW() WHERE id=? AND version=?",
-                    owner, leaseUntil, task.getId(), task.getVersion());
+            int changed =
+                    jdbcTemplate.update(
+                            "UPDATE tb_reliable_task SET status='RUNNING',locked_by=?,lease_until=?,"
+                                    + "version=version+1,update_time=NOW() WHERE id=? AND version=?",
+                            owner,
+                            leaseUntil,
+                            task.getId(),
+                            task.getVersion());
             if (changed == 1) {
                 task.setLockedBy(owner);
                 task.setLeaseUntil(leaseUntil);
@@ -82,81 +95,113 @@ public class ReliableTaskRepository {
                 claimed.add(task);
             }
         }
+
         return claimed;
     }
 
     public boolean markDone(ReliableTask task) {
         return jdbcTemplate.update(
-                "UPDATE tb_reliable_task SET status='DONE',locked_by=NULL,lease_until=NULL,update_time=NOW() " +
-                        "WHERE id=? AND status='RUNNING' AND locked_by=? AND version=?",
-                task.getId(), task.getLockedBy(), task.getVersion()) == 1;
+                        "UPDATE tb_reliable_task SET status='DONE',locked_by=NULL,lease_until=NULL,update_time=NOW() "
+                                + "WHERE id=? AND status='RUNNING' AND locked_by=? AND version=?",
+                        task.getId(),
+                        task.getLockedBy(),
+                        task.getVersion())
+                == 1;
     }
 
     public FailureDisposition markFailed(ReliableTask task, String error) {
         int nextRetryCount = task.getRetryCount() + 1;
-        String safeError = error == null ? "unknown" : error.substring(0, Math.min(error.length(), 500));
+        String safeError =
+                error == null ? "unknown" : error.substring(0, Math.min(error.length(), 500));
         if (nextRetryCount >= task.getMaxRetry()) {
-            int changed = jdbcTemplate.update(
-                    "UPDATE tb_reliable_task SET status='DEAD',retry_count=?,last_error=?," +
-                            "locked_by=NULL,lease_until=NULL,update_time=NOW() " +
-                            "WHERE id=? AND status='RUNNING' AND locked_by=? AND version=?",
-                    nextRetryCount, safeError, task.getId(), task.getLockedBy(), task.getVersion());
+            int changed =
+                    jdbcTemplate.update(
+                            "UPDATE tb_reliable_task SET status='DEAD',retry_count=?,last_error=?,"
+                                    + "locked_by=NULL,lease_until=NULL,update_time=NOW() "
+                                    + "WHERE id=? AND status='RUNNING' AND locked_by=? AND version=?",
+                            nextRetryCount,
+                            safeError,
+                            task.getId(),
+                            task.getLockedBy(),
+                            task.getVersion());
             return changed == 1 ? FailureDisposition.DEAD : FailureDisposition.LOST_LEASE;
         }
+
         int delaySeconds = Math.min(300, 1 << Math.min(nextRetryCount, 8));
         LocalDateTime next = LocalDateTime.now().plusSeconds(delaySeconds);
-        int changed = jdbcTemplate.update(
-                "UPDATE tb_reliable_task SET status='PENDING',retry_count=?,next_retry_time=?,last_error=?," +
-                        "locked_by=NULL,lease_until=NULL,update_time=NOW() " +
-                        "WHERE id=? AND status='RUNNING' AND locked_by=? AND version=?",
-                nextRetryCount, next, safeError, task.getId(), task.getLockedBy(), task.getVersion());
+        int changed =
+                jdbcTemplate.update(
+                        "UPDATE tb_reliable_task SET status='PENDING',retry_count=?,next_retry_time=?,last_error=?,"
+                                + "locked_by=NULL,lease_until=NULL,update_time=NOW() "
+                                + "WHERE id=? AND status='RUNNING' AND locked_by=? AND version=?",
+                        nextRetryCount,
+                        next,
+                        safeError,
+                        task.getId(),
+                        task.getLockedBy(),
+                        task.getVersion());
         return changed == 1 ? FailureDisposition.RETRY : FailureDisposition.LOST_LEASE;
     }
 
     public boolean replayDead(Long id) {
         return jdbcTemplate.update(
-                "UPDATE tb_reliable_task SET status='PENDING',retry_count=0,next_retry_time=NOW()," +
-                        "last_error=NULL,locked_by=NULL,lease_until=NULL,version=version+1,update_time=NOW() " +
-                        "WHERE id=? AND status='DEAD'", id) == 1;
+                        "UPDATE tb_reliable_task SET status='PENDING',retry_count=0,next_retry_time=NOW(),"
+                                + "last_error=NULL,locked_by=NULL,lease_until=NULL,version=version+1,update_time=NOW() "
+                                + "WHERE id=? AND status='DEAD'",
+                        id)
+                == 1;
     }
 
     public long countByStatus(String status) {
-        Long count = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM tb_reliable_task WHERE status=?", Long.class, status);
+        Long count =
+                jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM tb_reliable_task WHERE status=?", Long.class, status);
         return count == null ? 0L : count;
     }
 
     public long countByStatusAndType(String status, String type) {
-        Long count = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM tb_reliable_task WHERE status=? AND task_type=?",
-                new Object[]{status, type}, Long.class);
+        Long count =
+                jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM tb_reliable_task WHERE status=? AND task_type=?",
+                        new Object[] {status, type},
+                        Long.class);
         return count == null ? 0L : count;
     }
 
     public long countReadyByType(String type) {
-        Long count = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM tb_reliable_task WHERE task_type=? AND " +
-                        "((status='PENDING' AND next_retry_time<=NOW()) OR (status='RUNNING' AND lease_until<=NOW()))",
-                new Object[]{type}, Long.class);
+        Long count =
+                jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM tb_reliable_task WHERE task_type=? AND "
+                                + "((status='PENDING' AND next_retry_time<=NOW()) OR (status='RUNNING' AND lease_until<=NOW()))",
+                        new Object[] {type},
+                        Long.class);
         return count == null ? 0L : count;
     }
 
-    /** Tasks that a worker could claim now, including abandoned RUNNING leases. */
+    /**
+     * Tasks that a worker could claim now, including abandoned RUNNING leases.
+     */
     public long countReady() {
-        Long count = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM tb_reliable_task " +
-                        "WHERE (status='PENDING' AND next_retry_time<=NOW()) " +
-                        "OR (status='RUNNING' AND lease_until<=NOW())", Long.class);
+        Long count =
+                jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM tb_reliable_task "
+                                + "WHERE (status='PENDING' AND next_retry_time<=NOW()) "
+                                + "OR (status='RUNNING' AND lease_until<=NOW())",
+                        Long.class);
         return count == null ? 0L : count;
     }
 
-    /** Age is measured from the due/lease-expiry time, so future timeout tasks do not look like backlog. */
+    /**
+     * Age is measured from the due/lease-expiry time, so future timeout tasks do not look like backlog.
+     */
     public long oldestReadyAgeSeconds() {
-        Long age = jdbcTemplate.queryForObject(
-                "SELECT COALESCE(TIMESTAMPDIFF(SECOND,MIN(" +
-                        "CASE WHEN status='PENDING' THEN next_retry_time ELSE lease_until END),NOW()),0) " +
-                        "FROM tb_reliable_task WHERE (status='PENDING' AND next_retry_time<=NOW()) " +
-                        "OR (status='RUNNING' AND lease_until<=NOW())", Long.class);
+        Long age =
+                jdbcTemplate.queryForObject(
+                        "SELECT COALESCE(TIMESTAMPDIFF(SECOND,MIN("
+                                + "CASE WHEN status='PENDING' THEN next_retry_time ELSE lease_until END),NOW()),0) "
+                                + "FROM tb_reliable_task WHERE (status='PENDING' AND next_retry_time<=NOW()) "
+                                + "OR (status='RUNNING' AND lease_until<=NOW())",
+                        Long.class);
         return age == null ? 0L : Math.max(0L, age);
     }
 }

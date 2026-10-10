@@ -11,7 +11,7 @@ import lombok.experimental.Accessors;
 
 /**
  * <p>
- * 
+ *
  * </p>
  *
  * @since 2021-12-22
@@ -44,6 +44,4 @@ public class Subscription implements Serializable {
      * 创建时间
      */
     private LocalDateTime createTime;
-
-
 }

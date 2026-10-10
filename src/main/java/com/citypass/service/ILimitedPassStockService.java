@@ -10,6 +10,4 @@ import com.baomidou.mybatisplus.extension.service.IService;
  *
  * @since 2022-01-04
  */
-public interface ILimitedPassStockService extends IService<LimitedPassStock> {
-
-}
+public interface ILimitedPassStockService extends IService<LimitedPassStock> {}

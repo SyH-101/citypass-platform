@@ -11,7 +11,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-
 import javax.annotation.Resource;
 
 /**
@@ -34,8 +33,9 @@ public class StoryCommentController {
     }
 
     @GetMapping("/story/{storyId}")
-    public Result list(@PathVariable Long storyId,
-                       @RequestParam(value = "current", defaultValue = "1") Integer current) {
+    public Result list(
+            @PathVariable Long storyId,
+            @RequestParam(value = "current", defaultValue = "1") Integer current) {
         return storyCommentService.listComments(storyId, current);
     }
 

@@ -14,6 +14,6 @@ import org.springframework.stereotype.Service;
  * @since 2022-01-04
  */
 @Service
-public class LimitedPassStockServiceImpl extends ServiceImpl<LimitedPassStockMapper, LimitedPassStock> implements ILimitedPassStockService {
-
-}
+public class LimitedPassStockServiceImpl
+        extends ServiceImpl<LimitedPassStockMapper, LimitedPassStock>
+        implements ILimitedPassStockService {}

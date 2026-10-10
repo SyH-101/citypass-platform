@@ -24,5 +24,4 @@ public interface IStoryService extends IService<Story> {
     Result queryByAuthor(Long userId, Integer current, boolean own);
 
     Result queryStoriesOfSubscriptions(Long max, Integer offset);
-
 }

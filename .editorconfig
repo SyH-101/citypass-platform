@@ -1,0 +1,19 @@
+root = true
+
+[*.java]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 4
+tab_width = 4
+max_line_length = 100
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+ij_java_keep_simple_methods_in_one_line = false
+ij_java_keep_simple_blocks_in_one_line = false
+ij_java_keep_simple_lambdas_in_one_line = false
+ij_java_if_brace_force = always
+ij_java_for_brace_force = always
+ij_java_while_brace_force = always
+ij_java_do_while_brace_force = always

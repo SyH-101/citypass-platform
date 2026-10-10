@@ -10,10 +10,11 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-
 import javax.annotation.Resource;
 
-/** 城市活动限量预约接口。 */
+/**
+ * 城市活动限量预约接口。
+ */
 @RestController
 @RequestMapping("/reservations")
 public class ReservationController {
@@ -22,8 +23,9 @@ public class ReservationController {
     private IReservationService reservationService;
 
     @PostMapping("/{passId}")
-    public Result reserve(@PathVariable Long passId,
-                          @RequestParam(defaultValue = "true") boolean acceptWaitlist) {
+    public Result reserve(
+            @PathVariable Long passId,
+            @RequestParam(defaultValue = "true") boolean acceptWaitlist) {
         return reservationService.reserve(passId, acceptWaitlist);
     }
 

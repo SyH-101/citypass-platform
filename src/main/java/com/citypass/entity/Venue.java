@@ -8,13 +8,12 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.experimental.Accessors;
-
 import java.io.Serializable;
 import java.time.LocalDateTime;
 
 /**
  * <p>
- * 
+ *
  * </p>
  *
  * @since 2021-12-22
@@ -103,10 +102,11 @@ public class Venue implements Serializable {
      */
     private LocalDateTime updateTime;
 
-    /** 每次业务写入递增，缓存重建只能写回同版本或更新版本的数据。 */
+    /**
+     * 每次业务写入递增，缓存重建只能写回同版本或更新版本的数据。
+     */
     @TableField(updateStrategy = FieldStrategy.NEVER)
     private Long cacheVersion;
-
 
     @TableField(exist = false)
     private Double distance;

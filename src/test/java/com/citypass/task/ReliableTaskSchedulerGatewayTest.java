@@ -10,7 +10,6 @@ import com.citypass.utils.VenueCacheInvalidator;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.util.ReflectionTestUtils;
-
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
@@ -26,14 +25,15 @@ class ReliableTaskSchedulerGatewayTest {
         ReliableTaskRepository repository = mock(ReliableTaskRepository.class);
         VenueCacheInvalidator invalidator = mock(VenueCacheInvalidator.class);
         ReliableTaskMetrics metrics = mock(ReliableTaskMetrics.class);
-        ReliableTaskScheduler scheduler = new ReliableTaskScheduler(
-                repository,
-                mock(OrderMessagePublisher.class),
-                mock(StringRedisTemplate.class),
-                invalidator,
-                metrics,
-                mock(StoryFeedHandler.class), mock(StoryFileCleanup.class));
-
+        ReliableTaskScheduler scheduler =
+                new ReliableTaskScheduler(
+                        repository,
+                        mock(OrderMessagePublisher.class),
+                        mock(StringRedisTemplate.class),
+                        invalidator,
+                        metrics,
+                        mock(StoryFeedHandler.class),
+                        mock(StoryFileCleanup.class));
         ReliableTask task = new ReliableTask();
         task.setId(99L);
         task.setTaskType(ReliableTaskRepository.INVALIDATE_VENUE_CACHE);
@@ -42,14 +42,12 @@ class ReliableTaskSchedulerGatewayTest {
         task.setMaxRetry(12);
         task.setLockedBy("worker-a");
         task.setVersion(3L);
-
         doThrow(new IllegalStateException("gateway-b purge failed"))
-                .when(invalidator).evict(7L, 6L);
+                .when(invalidator)
+                .evict(7L, 6L);
         when(repository.markFailed(eq(task), contains("gateway-b")))
                 .thenReturn(ReliableTaskRepository.FailureDisposition.RETRY);
-
         ReflectionTestUtils.invokeMethod(scheduler, "execute", task);
-
         verify(repository, never()).markDone(task);
         verify(repository).markFailed(eq(task), contains("gateway-b"));
         verify(metrics).retried(ReliableTaskRepository.INVALIDATE_VENUE_CACHE);

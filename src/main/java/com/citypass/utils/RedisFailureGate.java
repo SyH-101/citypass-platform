@@ -3,16 +3,26 @@ package com.citypass.utils;
 import com.citypass.config.CacheReliabilityProperties;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
-
 import java.util.concurrent.TimeUnit;
 import java.util.function.LongSupplier;
 
-/** Thread-safe CLOSED / OPEN / HALF_OPEN gate for cache Redis calls. */
+/**
+ * Thread-safe CLOSED / OPEN / HALF_OPEN gate for cache Redis calls.
+ */
 @Component
 public class RedisFailureGate {
 
-    public enum Permission { NORMAL, PROBE, REJECTED }
-    private enum State { CLOSED, OPEN, HALF_OPEN }
+    public enum Permission {
+        NORMAL,
+        PROBE,
+        REJECTED
+    }
+
+    private enum State {
+        CLOSED,
+        OPEN,
+        HALF_OPEN
+    }
 
     private final int failureThreshold;
     private final long openDurationNanos;
@@ -23,7 +33,10 @@ public class RedisFailureGate {
 
     @Autowired
     public RedisFailureGate(CacheReliabilityProperties properties) {
-        this(properties.getRedisFailureThreshold(), properties.getRedisOpenDurationMs(), System::nanoTime);
+        this(
+                properties.getRedisFailureThreshold(),
+                properties.getRedisOpenDurationMs(),
+                System::nanoTime);
     }
 
     RedisFailureGate(int failureThreshold, long openDurationMs, LongSupplier nanoTime) {
@@ -33,11 +46,15 @@ public class RedisFailureGate {
     }
 
     public synchronized Permission tryAcquire() {
-        if (state == State.CLOSED) return Permission.NORMAL;
+        if (state == State.CLOSED) {
+            return Permission.NORMAL;
+        }
+
         if (state == State.OPEN && nanoTime.getAsLong() >= reopenAtNanos) {
             state = State.HALF_OPEN;
             return Permission.PROBE;
         }
+
         return Permission.REJECTED;
     }
 
@@ -52,7 +69,10 @@ public class RedisFailureGate {
     }
 
     public synchronized void onFailure(Permission permission) {
-        if (permission == Permission.REJECTED) return;
+        if (permission == Permission.REJECTED) {
+            return;
+        }
+
         if (permission == Permission.PROBE) {
             open();
         } else if (state == State.CLOSED && ++consecutiveFailures >= failureThreshold) {
@@ -60,8 +80,13 @@ public class RedisFailureGate {
         }
     }
 
-    public synchronized int stateCode() { return state.ordinal(); }
-    public synchronized String stateName() { return state.name(); }
+    public synchronized int stateCode() {
+        return state.ordinal();
+    }
+
+    public synchronized String stateName() {
+        return state.name();
+    }
 
     private void open() {
         state = State.OPEN;
